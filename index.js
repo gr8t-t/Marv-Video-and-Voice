@@ -511,9 +511,8 @@ function startFrameLoop() {
       const prompt = promptInput.value.trim() ||
         "Transform my face and body realistically with enhanced lighting and clarity. Keep all objects and background unchanged.";
       const payload = { prompt, image_url: imageUrl };
-      if (referenceBase64 && !settingsApplied) {
+      if (referenceBase64) {
         payload.reference_image_url = referenceBase64;
-        settingsApplied = true;
       }
       wsSend(payload);
       frameInFlight = true;
