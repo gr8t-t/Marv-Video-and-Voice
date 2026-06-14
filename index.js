@@ -485,11 +485,16 @@ function setupOutputStream() {
   injectStream(outputCanvas.captureStream(30));
 }
 
-function displayOutputFrame(imageUrl) {
+function displayOutputFrame(bytes) {
   if (!outputCtx) return;
-  const img = new Image();
-  img.onload = () => outputCtx.drawImage(img, 0, 0, outputCanvas.width, outputCanvas.height);
-  img.src = imageUrl;
+  const blob = new Blob([bytes], { type: "image/jpeg" });
+  const url  = URL.createObjectURL(blob);
+  const img  = new Image();
+  img.onload = () => {
+    outputCtx.drawImage(img, 0, 0, outputCanvas.width, outputCanvas.height);
+    URL.revokeObjectURL(url);
+  };
+  img.src = url;
 }
 
 function startFrameLoop() {
@@ -530,29 +535,28 @@ function stopFrameLoop() {
 async function handleFalMessage(data) {
   if (!data || typeof data !== "object") return;
 
-  // Convert binary image bytes to data URL
-  function binToDataUrl(bytes) {
-    let s = ""; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-    return "data:image/jpeg;base64," + btoa(s);
-  }
-
-  // Successful image result (check many possible response shapes)
-  const raw0 = data?.images?.[0];
-  const imgUrl = (raw0?.content instanceof Uint8Array ? binToDataUrl(raw0.content) : null)
-    || (raw0 instanceof Uint8Array ? binToDataUrl(raw0) : null)
-    || raw0?.content?.url
-    || raw0?.url
-    || (data?.image instanceof Uint8Array ? binToDataUrl(data.image) : null)
-    || data?.image?.url
-    || data?.output?.url
-    || data?.result?.url
+  // Extract image bytes from any response shape fal.ai might use
+  const raw0     = data?.images?.[0];
+  const imgBytes = (raw0?.content instanceof Uint8Array) ? raw0.content
+    : (raw0 instanceof Uint8Array)                        ? raw0
+    : (data?.image instanceof Uint8Array)                 ? data.image
+    : null;
+  const imgStrUrl = raw0?.content?.url || raw0?.url || data?.image?.url
+    || data?.output?.url || data?.result?.url
     || (typeof raw0 === "string" ? raw0 : null);
 
-  if (imgUrl) {
+  if (imgBytes || imgStrUrl) {
     frameInFlight = false;
-    displayOutputFrame(imgUrl);
+    if (imgBytes) {
+      displayOutputFrame(imgBytes);
+    } else {
+      const img = new Image();
+      img.onload = () => outputCtx && outputCtx.drawImage(img, 0, 0, outputCanvas.width, outputCanvas.height);
+      img.src = imgStrUrl;
+    }
     if (!isConnected) {
       isConnected = true;
+      console.log("Going LIVE");
       setStatus("LIVE", "live");
       stopBtn.disabled  = false;
       applyBtn.disabled = false;
