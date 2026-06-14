@@ -12,20 +12,15 @@
       width: 100%; height: 100%;
       background: #000;
       overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
     }
 
-    /* ── VIDEO: fills entire screen ── */
-    #output-video {
+    /* ── CANVAS: fills entire screen ── */
+    #output-canvas {
       position: fixed;
       inset: 0;
       width: 100vw;
       height: 100vh;
-      object-fit: cover;
       display: block;
-      transform: scaleX(-1);
       background: #000;
       z-index: 1;
     }
@@ -104,10 +99,7 @@
     }
     #error-screen.show { display: flex; }
 
-    .error-icon {
-      font-size: 3rem;
-      margin-bottom: 4px;
-    }
+    .error-icon { font-size: 3rem; margin-bottom: 4px; }
     .error-title {
       font-size: 0.95rem;
       letter-spacing: 0.14em;
@@ -150,19 +142,20 @@
     </div>
   </div>
 
-  <!-- VIDEO OUTPUT -->
-  <video id="output-video" autoplay muted playsinline></video>
+  <!-- CANVAS OUTPUT -->
+  <canvas id="output-canvas"></canvas>
 
   <script>
-    // ── DEVICE DETECTION ──────────────────────────────────────
+    // ── DEVICE DETECTION ────────────────────────────────────────────────────────
     const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
       || (navigator.maxTouchPoints > 1 && /MacIntel/.test(navigator.platform))
       || window.innerWidth <= 768;
 
-    const params       = new URLSearchParams(window.location.search);
-    const format       = params.get("format") || "laptop";
+    const params  = new URLSearchParams(window.location.search);
+    const format  = params.get("format") || "laptop";
 
-    const video        = document.getElementById("output-video");
+    const canvas       = document.getElementById("output-canvas");
+    const ctx          = canvas.getContext("2d");
     const overlay      = document.getElementById("overlay");
     const spinner      = document.getElementById("spinner");
     const overlayTitle = document.getElementById("overlay-title");
@@ -173,7 +166,7 @@
     const errorMsg     = document.getElementById("error-msg");
     const errorBadge   = document.getElementById("error-badge");
 
-    // ── DEVICE vs FORMAT MISMATCH CHECK ─────────────────────
+    // ── DEVICE vs FORMAT MISMATCH CHECK ─────────────────────────────────────────
     if (format === "mobile" && !isMobile) {
       errorScreen.classList.add("show");
       overlay.style.display = "none";
@@ -188,23 +181,29 @@
       errorBadge.textContent = "💻 OPEN ON A LAPTOP";
     } else {
 
-      // ── CORRECT DEVICE: set up stream ───────────────────
+      // ── CORRECT DEVICE ───────────────────────────────────────────────────────
 
-      // Update tap label based on device
       tapLabel.textContent = isMobile ? "TAP TO GO FULLSCREEN" : "CLICK TO GO FULLSCREEN";
 
-      // ── FULLSCREEN ───────────────────────────────────────
+      // Size canvas to fill screen at device pixel ratio
+      function resizeCanvas() {
+        canvas.width  = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      resizeCanvas();
+      window.addEventListener("resize", resizeCanvas);
+
+      // ── FULLSCREEN ───────────────────────────────────────────────────────────
       let fullscreenTriggered = false;
 
       function goFullscreen() {
         if (fullscreenTriggered) return;
         fullscreenTriggered = true;
-        const el = document.documentElement;
+        const el  = document.documentElement;
         const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
         if (req) req.call(el).catch(() => {});
       }
 
-      // Show tap pill — user must click/tap to trigger fullscreen
       function showTapPrompt() {
         spinner.style.display = "none";
         overlayTitle.textContent = "STREAM READY";
@@ -216,38 +215,55 @@
         };
       }
 
-      // ── BROADCAST CHANNEL ────────────────────────────────
+      // ── DRAW FRAME ───────────────────────────────────────────────────────────
+      let promptShown = false;
+
+      function drawFrame(bytes) {
+        const blob = new Blob([bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes], { type: "image/jpeg" });
+        createImageBitmap(blob).then(bitmap => {
+          const bw = bitmap.width;
+          const bh = bitmap.height;
+          const cw = canvas.width;
+          const ch = canvas.height;
+          // cover-fit: scale to fill canvas
+          const scale = Math.max(cw / bw, ch / bh);
+          const dx = (cw - bw * scale) / 2;
+          const dy = (ch - bh * scale) / 2;
+          // mirror horizontally (like a selfie camera)
+          ctx.save();
+          ctx.translate(cw, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(bitmap, dx, dy, bw * scale, bh * scale);
+          ctx.restore();
+          bitmap.close();
+
+          if (!promptShown) {
+            promptShown = true;
+            showTapPrompt();
+          }
+        }).catch(e => console.warn("output draw error:", e));
+      }
+
+      // ── BROADCAST CHANNEL ────────────────────────────────────────────────────
       const channel = new BroadcastChannel("lucy_stream");
       channel.onmessage = (e) => {
-        if (e.data.type === "stream_ready") {
-          showTapPrompt();
-        }
-        if (e.data.type === "stream_stopped") {
-          video.srcObject = null;
+        if (e.data.type === "frame") {
+          drawFrame(e.data.data);
+        } else if (e.data.type === "stream_ready") {
+          if (!promptShown) showTapPrompt();
+        } else if (e.data.type === "stream_stopped") {
+          promptShown = false;
+          fullscreenTriggered = false;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
           overlay.classList.remove("hidden");
           overlay.onclick = null;
           tapPill.classList.remove("visible");
           spinner.style.display = "block";
           overlayTitle.textContent = "AWAITING STREAM…";
           overlaySub.textContent = "Stream will appear here shortly";
-          fullscreenTriggered = false;
           if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
         }
       };
-
-      // ── POLL OPENER FOR STREAM ────────────────────────────
-      function checkForStream() {
-        try {
-          if (window.opener && window.opener.lucyOutputStream) {
-            const stream = window.opener.lucyOutputStream;
-            video.srcObject = stream;
-            showTapPrompt();
-            return;
-          }
-        } catch (e) {}
-        setTimeout(checkForStream, 300);
-      }
-      checkForStream();
     }
   </script>
 </body>

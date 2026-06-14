@@ -467,13 +467,6 @@ function injectStream(stream) {
   outputVideo.style.display       = "block";
   window.lucyOutputStream = stream;
   channel.postMessage({ type: "stream_ready" });
-  try {
-    if (outputTab && !outputTab.closed) {
-      outputTab.lucyOutputStream = stream;
-      const v = outputTab.document.getElementById("output-video");
-      if (v) { v.srcObject = stream; }
-    }
-  } catch(e) {}
 }
 
 // ── FRAME CAPTURE & DISPLAY ───────────────────────────────────────────────────
@@ -489,14 +482,17 @@ function setupOutputStream() {
 }
 
 function displayOutputFrame(bytes) {
+  // Forward raw JPEG to output.html via BroadcastChannel (drawn there directly on canvas)
+  channel.postMessage({ type: "frame", data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
+
+  // Also draw to the main-page output video via captureStream canvas
   if (!outputCtx) return;
-  const ctx    = outputCtx;    // capture before async — stopFrameLoop may null these
+  const ctx    = outputCtx;
   const canvas = outputCanvas;
   const blob = new Blob([bytes], { type: "image/jpeg" });
   createImageBitmap(blob).then(bitmap => {
     ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    console.log("frame drawn to canvas, size:", canvas.width, "x", canvas.height);
   }).catch(e => console.warn("frame draw error:", e));
 }
 
