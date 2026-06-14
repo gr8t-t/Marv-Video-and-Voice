@@ -599,11 +599,13 @@ async function handleFalMessage(data) {
     return;
   }
 
-  // fal.ai system messages
+  // fal.ai system messages — timings are informational only, do NOT release frameInFlight
   if (data.type === "x-fal-message") {
-    clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
-    frameInFlight = false;
-    if (data.action !== "timings") console.log("fal.ai x-fal-message:", data.action, JSON.stringify(data));
+    if (data.action !== "timings") {
+      console.log("fal.ai x-fal-message:", data.action, JSON.stringify(data));
+      clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
+      frameInFlight = false;
+    }
     return;
   }
 
@@ -727,6 +729,7 @@ function attachFalWsHandlers(ws) {
 async function reconnectFalWs() {
   setStatus("RECONNECTING…", "connecting");
   stopFrameLoop(true);   // keep outputCanvas/outputCtx alive
+  sessionFrameCount = 0; // ensure reference goes out on first frame of new session
   if (falWs) { try { falWs.close(); } catch(_) {} falWs = null; }
 
   try {
