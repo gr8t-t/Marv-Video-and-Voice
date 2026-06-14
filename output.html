@@ -85,6 +85,25 @@
     }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
+    /* ── RECONNECT BANNER ── */
+    #reconnect-banner {
+      display: none;
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      background: rgba(8, 8, 13, 0.88);
+      border: 1px solid #c8ff3e;
+      color: #c8ff3e;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      padding: 8px 22px;
+      border-radius: 100px;
+      white-space: nowrap;
+    }
+
     /* ── ERROR SCREEN ── */
     #error-screen {
       display: none;
@@ -142,6 +161,9 @@
     </div>
   </div>
 
+  <!-- RECONNECT BANNER -->
+  <div id="reconnect-banner">⟳ RECONNECTING…</div>
+
   <!-- CANVAS OUTPUT -->
   <canvas id="output-canvas"></canvas>
 
@@ -154,17 +176,18 @@
     const params  = new URLSearchParams(window.location.search);
     const format  = params.get("format") || "laptop";
 
-    const canvas       = document.getElementById("output-canvas");
-    const ctx          = canvas.getContext("2d");
-    const overlay      = document.getElementById("overlay");
-    const spinner      = document.getElementById("spinner");
-    const overlayTitle = document.getElementById("overlay-title");
-    const overlaySub   = document.getElementById("overlay-sub");
-    const tapPill      = document.getElementById("tap-pill");
-    const tapLabel     = document.getElementById("tap-label");
-    const errorScreen  = document.getElementById("error-screen");
-    const errorMsg     = document.getElementById("error-msg");
-    const errorBadge   = document.getElementById("error-badge");
+    const canvas          = document.getElementById("output-canvas");
+    const ctx             = canvas.getContext("2d");
+    const overlay         = document.getElementById("overlay");
+    const spinner         = document.getElementById("spinner");
+    const overlayTitle    = document.getElementById("overlay-title");
+    const overlaySub      = document.getElementById("overlay-sub");
+    const tapPill         = document.getElementById("tap-pill");
+    const tapLabel        = document.getElementById("tap-label");
+    const errorScreen     = document.getElementById("error-screen");
+    const errorMsg        = document.getElementById("error-msg");
+    const errorBadge      = document.getElementById("error-badge");
+    const reconnectBanner = document.getElementById("reconnect-banner");
 
     // ── DEVICE vs FORMAT MISMATCH CHECK ─────────────────────────────────────────
     if (format === "mobile" && !isMobile) {
@@ -251,7 +274,12 @@
           drawFrame(e.data.data);
         } else if (e.data.type === "stream_ready") {
           if (!promptShown) showTapPrompt();
+        } else if (e.data.type === "reconnecting") {
+          reconnectBanner.style.display = "block";
+        } else if (e.data.type === "warmed") {
+          reconnectBanner.style.display = "none";
         } else if (e.data.type === "stream_stopped") {
+          reconnectBanner.style.display = "none";
           promptShown = false;
           fullscreenTriggered = false;
           ctx.clearRect(0, 0, canvas.width, canvas.height);

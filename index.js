@@ -172,12 +172,13 @@ let balance         = 0;
 let activeVoiceId   = null;
 
 // Frame capture (replaces WebRTC)
-let captureCanvas  = null;
-let captureCtx     = null;
-let outputCanvas   = null;
-let outputCtx      = null;
-let frameLoopId    = null;
-let frameInFlight  = false;
+let captureCanvas    = null;
+let captureCtx       = null;
+let outputCanvas     = null;
+let outputCtx        = null;
+let frameLoopId      = null;
+let frameInFlight    = false;
+let warmResponseCount = 0;
 
 // ── BROADCAST CHANNEL ─────────────────────────────────────────────────────────
 const channel = new BroadcastChannel("lucy_stream");
@@ -535,15 +536,17 @@ function startFrameLoop() {
         "Transform me into the person in the reference image. Keep background unchanged.";
       sessionFrameCount++;
       const payload = { prompt, image_url: imageUrl };
-      // Send reference on frame 1, then every 5 frames to keep model anchored
-      const sendingRef = !!(referenceBase64 && (sessionFrameCount === 1 || sessionFrameCount % 5 === 0));
+      // Send reference only on first frame of each WS session, or when Apply Settings clicked.
+      // Sending it more often forces the model to restart its pipeline → periodic slowdowns.
+      const sendingRef = !!(referenceBase64 && (sessionFrameCount === 1 || !settingsApplied));
       if (sendingRef) {
         payload.reference_image_url = referenceBase64;
-        if (sessionFrameCount === 1) console.log("Sending reference image, base64 size:", Math.round(referenceBase64.length / 1024) + "KB");
+        settingsApplied   = true;
+        warmResponseCount = 0; // model will re-warm with new reference
+        console.log("Sending reference image, size:", Math.round(referenceBase64.length / 1024) + "KB");
       }
       wsSend(payload);
       frameInFlight = true;
-      // Give more time when reference is included (model takes longer to process)
       clearTimeout(frameInFlightTimer);
       frameInFlightTimer = setTimeout(() => {
         console.warn("frameInFlight timeout — unblocking");
@@ -580,6 +583,14 @@ async function handleFalMessage(data) {
   if (imgBytes || imgStrUrl) {
     clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
     frameInFlight = false;
+    warmResponseCount++;
+    if (warmResponseCount <= 2) {
+      // Skip first 2 responses per session — model hasn't fully loaded the reference yet.
+      // Showing these frames causes the "wrong/different avatar" flash the user sees.
+      console.log(`Warmup frame ${warmResponseCount}/2 — suppressing`);
+      return;
+    }
+    if (warmResponseCount === 3) channel.postMessage({ type: "warmed" });
     if (imgBytes) {
       displayOutputFrame(imgBytes);
     } else {
@@ -642,6 +653,7 @@ async function startStream() {
   setStatus("STARTING…", "connecting");
   settingsApplied   = false;
   sessionFrameCount = 0;
+  warmResponseCount = 0;
   openOutputTab();
 
   try {
@@ -698,11 +710,7 @@ function attachFalWsHandlers(ws) {
     const raw  = event.data;
     const data = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch(_) { return null; } })() : Msgpack.decode(raw);
     if (data) {
-      const keys = Object.keys(data);
-      console.log("fal.ai decoded keys:", keys, "| sample:", JSON.stringify(data, (k,v) => v instanceof Uint8Array ? `<Uint8Array len=${v.length}>` : v).slice(0, 300));
       await handleFalMessage(data);
-    } else {
-      console.log("fal.ai decode failed, raw size:", typeof raw === "string" ? raw.length : raw.byteLength, "first byte:", new Uint8Array(raw instanceof ArrayBuffer ? raw : raw.buffer)[0]?.toString(16));
     }
   };
 
@@ -729,7 +737,9 @@ function attachFalWsHandlers(ws) {
 async function reconnectFalWs() {
   setStatus("RECONNECTING…", "connecting");
   stopFrameLoop(true);   // keep outputCanvas/outputCtx alive
-  sessionFrameCount = 0; // ensure reference goes out on first frame of new session
+  sessionFrameCount = 0;
+  warmResponseCount = 0;
+  channel.postMessage({ type: "reconnecting" });
   if (falWs) { try { falWs.close(); } catch(_) {} falWs = null; }
 
   try {
