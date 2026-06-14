@@ -488,13 +488,10 @@ function setupOutputStream() {
 function displayOutputFrame(bytes) {
   if (!outputCtx) return;
   const blob = new Blob([bytes], { type: "image/jpeg" });
-  const url  = URL.createObjectURL(blob);
-  const img  = new Image();
-  img.onload = () => {
-    outputCtx.drawImage(img, 0, 0, outputCanvas.width, outputCanvas.height);
-    URL.revokeObjectURL(url);
-  };
-  img.src = url;
+  createImageBitmap(blob).then(bitmap => {
+    outputCtx.drawImage(bitmap, 0, 0, outputCanvas.width, outputCanvas.height);
+    bitmap.close();
+  }).catch(e => console.warn("frame draw error:", e));
 }
 
 function startFrameLoop() {
