@@ -562,19 +562,18 @@ function startFrameLoop() {
         "Transform me into the person in the reference image. Keep background unchanged.";
       sessionFrameCount++;
       const payload = { prompt, image_url: imageUrl };
-      // Prefer the CDN URL (model requires an HTTPS URL for reference_image_url;
-      // base64 data URLs are silently ignored). Fall back to base64 if upload failed.
+      // Decart's API uses the field "image" for the reference photo (not "reference_image_url").
+      // CDN URL is preferred; fall back to base64 data URL if upload hasn't finished.
       const refData = referenceUrl || referenceBase64;
-      // Send reference on first 3 frames per session for multiple embedding passes,
-      // plus whenever Apply Settings is clicked.
+      // Send on first 3 frames per session (multiple embedding passes) + Apply Settings.
       const sendingRef = !!(refData && (sessionFrameCount <= 3 || !settingsApplied));
       if (sendingRef) {
-        payload.reference_image_url = refData;
+        payload.image = refData;               // Decart SDK field name for reference photo
         if (sessionFrameCount === 1) {
           settingsApplied   = true;
           warmResponseCount = 0;
-          const refType = referenceUrl ? "CDN URL" : "base64 fallback";
-          console.log(`Sending reference (${refType}):`, referenceUrl || Math.round(referenceBase64.length / 1024) + "KB");
+          const refType = referenceUrl ? "CDN URL" : "base64";
+          console.log(`Sending reference image (${refType}):`, referenceUrl ?? Math.round(referenceBase64.length / 1024) + "KB");
         }
       }
       wsSend(payload);
