@@ -538,7 +538,9 @@ async function handleFalMessage(data) {
 
   // Successful image result (check many possible response shapes)
   const raw0 = data?.images?.[0];
-  const imgUrl = (raw0 instanceof Uint8Array ? binToDataUrl(raw0) : null)
+  const imgUrl = (raw0?.content instanceof Uint8Array ? binToDataUrl(raw0.content) : null)
+    || (raw0 instanceof Uint8Array ? binToDataUrl(raw0) : null)
+    || raw0?.content?.url
     || raw0?.url
     || (data?.image instanceof Uint8Array ? binToDataUrl(data.image) : null)
     || data?.image?.url
