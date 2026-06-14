@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MARV — Realtime AI Video Transform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #060608;
+      --surface:      #0d0d10;
+      --surface2:     #111116;
+      --border:       #1f1f26;
+      --border2:      #2a2a35;
+      --neon:         #ff1a1a;
+      --neon-glow:    rgba(255,26,26,0.4);
+      --metallic:     #c0392b;
+      --dark-red:     #7b0d0d;
+      --deep-red:     #2d0505;
+      --text:         #f0f0f5;
+      --muted:        #55556a;
+      --muted2:       #38384a;
+      --green:        #3eff8b;
+      --radius:       10px;
+      --radius-lg:    16px;
+    }
+
+    html { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; scroll-behavior: smooth; }
+    body { min-height: 100vh; overflow-x: hidden; overflow-y: auto; }
+
+    body::before {
+      content: ''; position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 9999; opacity: 0.5;
+    }
+    body::after {
+      content: ''; position: fixed;
+      top: -200px; left: 50%; transform: translateX(-50%);
+      width: 900px; height: 500px;
+      background: radial-gradient(ellipse, rgba(255,26,26,0.07) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ══ HEADER ══ */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 36px; height: 68px;
+      background: rgba(6,6,8,0.92); backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo-wrap { display: flex; align-items: center; gap: 14px; }
+    .marv-logo { height: 38px; overflow: visible; }
+    .logo-signal { display: flex; align-items: center; gap: 6px; }
+    .logo-signal-bar { width: 3px; border-radius: 2px; background: var(--neon); box-shadow: 0 0 6px var(--neon); animation: signal-pulse 1.4s ease-in-out infinite; }
+    .logo-signal-bar:nth-child(1) { height: 8px;  animation-delay: 0s; }
+    .logo-signal-bar:nth-child(2) { height: 14px; animation-delay: 0.15s; }
+    .logo-signal-bar:nth-child(3) { height: 20px; animation-delay: 0.3s; }
+    .logo-signal-bar:nth-child(4) { height: 14px; animation-delay: 0.45s; }
+    .logo-signal-bar:nth-child(5) { height: 8px;  animation-delay: 0.6s; }
+    @keyframes signal-pulse { 0%,100%{opacity:1} 50%{opacity:0.25} }
+    .logo-sub { font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.22em; color: var(--muted); text-transform: uppercase; margin-top: 2px; }
+
+    #status-badge {
+      font-family: 'Space Mono', monospace; font-size: 0.68rem; letter-spacing: 0.1em;
+      padding: 6px 14px; border-radius: 100px; border: 1px solid var(--border2);
+      background: var(--surface); color: var(--muted); transition: all 0.3s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    #status-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted2); transition: all 0.3s; flex-shrink: 0; }
+    #status-badge.live { color: var(--neon); border-color: var(--neon); background: rgba(255,26,26,0.06); box-shadow: 0 0 20px rgba(255,26,26,0.12); }
+    #status-badge.live .dot { background: var(--neon); box-shadow: 0 0 10px var(--neon); animation: dot-pulse 1.4s infinite; }
+    #status-badge.connecting { color: #ff8c42; border-color: #ff8c42; background: rgba(255,140,66,0.06); }
+    #status-badge.connecting .dot { background: #ff8c42; }
+    #status-badge.error { color: var(--neon); border-color: var(--dark-red); background: var(--deep-red); }
+    #status-badge.error .dot { background: var(--neon); }
+    @keyframes dot-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
+
+    /* ── COIN DISPLAY IN HEADER ── */
+    #coin-chip {
+      display: none; align-items: center; gap: 8px;
+      background: var(--surface); border: 1px solid var(--border2);
+      border-radius: 100px; padding: 5px 14px;
+      font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.08em;
+      cursor: pointer; transition: all 0.2s;
+    }
+    #coin-chip:hover { border-color: var(--metallic); }
+    #coin-chip.low { border-color: rgba(255,26,26,0.5); color: var(--neon); animation: chip-pulse 1.5s infinite; }
+    @keyframes chip-pulse { 0%,100%{box-shadow:0 0 0 rgba(255,26,26,0)} 50%{box-shadow:0 0 12px rgba(255,26,26,0.3)} }
+    .coin-icon { font-size: 0.75rem; }
+    #coin-balance { color: var(--text); font-weight: 700; }
+
+    /* ══ MAIN ══ */
+    .main { position: relative; z-index: 1; padding: 32px 36px 60px; max-width: 1600px; margin: 0 auto; }
+
+    .section-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .section-heading-line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--border2), transparent); }
+    .section-heading-text { font-family: 'Space Mono', monospace; font-size: 0.6rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
+
+    /* ══ VIDEO PANELS ══ */
+    .video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 40px; }
+    .video-panel { position: relative; border-radius: var(--radius-lg); overflow: hidden; background: #000; border: 1px solid var(--border); aspect-ratio: 16/9; transition: border-color 0.3s, box-shadow 0.3s; }
+    .video-panel.output-panel.active { border-color: var(--neon); box-shadow: 0 0 30px rgba(255,26,26,0.15), 0 0 1px var(--neon) inset; }
+    .video-panel video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transform: scaleX(-1); }
+    .panel-label { position: absolute; top: 14px; left: 14px; z-index: 10; font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.14em; text-transform: uppercase; padding: 5px 10px; border-radius: 6px; background: rgba(6,6,8,0.82); backdrop-filter: blur(10px); color: var(--muted); border: 1px solid var(--border2); }
+    .panel-label.live-label { color: var(--neon); border-color: rgba(255,26,26,0.4); background: rgba(255,26,26,0.08); }
+    .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--neon); margin-right: 6px; box-shadow: 0 0 6px var(--neon); animation: dot-pulse 1.4s infinite; vertical-align: middle; }
+    .res-badge { position: absolute; bottom: 14px; right: 14px; z-index: 10; font-family: 'Space Mono', monospace; font-size: 0.55rem; letter-spacing: 0.1em; padding: 4px 9px; border-radius: 5px; background: rgba(6,6,8,0.75); backdrop-filter: blur(8px); color: var(--muted2); border: 1px solid var(--border); }
+
+    #billing-counter { position: absolute; bottom: 14px; left: 14px; z-index: 10; font-family: 'Space Mono', monospace; font-size: 0.6rem; padding: 4px 10px; border-radius: 6px; background: rgba(6,6,8,0.82); backdrop-filter: blur(8px); color: var(--neon); border: 1px solid rgba(255,26,26,0.3); display: none; }
+
+    .video-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--muted2); font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.06em; background: repeating-linear-gradient(-45deg, var(--surface) 0px, var(--surface) 12px, var(--bg) 12px, var(--bg) 24px); }
+    .video-placeholder svg { opacity: 0.18; }
+    .video-placeholder span { opacity: 0.45; }
+
+    /* ══ CONTROLS ══ */
+    .controls-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .controls-row  { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 22px 22px 20px; position: relative; overflow: hidden; transition: border-color 0.2s; }
+    .card:hover { border-color: var(--border2); }
+    .card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,26,26,0.15), transparent); }
+    .card-title { font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    .card-title-icon { width: 18px; height: 18px; border-radius: 4px; background: rgba(255,26,26,0.12); border: 1px solid rgba(255,26,26,0.2); display: flex; align-items: center; justify-content: center; font-size: 9px; }
+
+    input[type="text"], input[type="password"], input[type="email"], textarea {
+      background: var(--bg); border: 1px solid var(--border2); color: var(--text);
+      border-radius: var(--radius); padding: 10px 13px;
+      font-family: 'Space Mono', monospace; font-size: 0.76rem; width: 100%;
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, textarea:focus { border-color: var(--neon); box-shadow: 0 0 0 3px rgba(255,26,26,0.08); }
+    textarea { resize: vertical; min-height: 80px; line-height: 1.6; font-family: 'Inter', sans-serif; font-size: 0.82rem; }
+
+    .presets { display: flex; gap: 7px; flex-wrap: wrap; }
+    .preset-btn { flex: 1; min-width: 0; padding: 9px 8px; border-radius: 8px; border: 1px solid var(--border2); background: var(--bg); color: var(--muted); font-family: 'Space Mono', monospace; font-size: 0.64rem; letter-spacing: 0.04em; cursor: pointer; transition: all 0.18s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .preset-btn:hover { border-color: var(--metallic); color: var(--text); }
+    .preset-btn.active { border-color: var(--neon); color: var(--neon); background: rgba(255,26,26,0.07); box-shadow: 0 0 12px rgba(255,26,26,0.08); }
+
+    .upload-zone { border: 1.5px dashed var(--border2); border-radius: var(--radius); padding: 20px 16px; cursor: pointer; transition: all 0.2s; text-align: center; position: relative; }
+    .upload-zone:hover, .upload-zone.drag-over { border-color: var(--metallic); background: rgba(192,57,43,0.05); }
+    .upload-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .upload-zone-inner { pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--muted); font-size: 0.78rem; }
+    .upload-zone-inner svg { opacity: 0.4; }
+    .upload-zone-inner strong { color: var(--text); font-weight: 600; }
+    #image-preview-wrap { display: none; position: relative; }
+    #image-preview { width: 100%; border-radius: var(--radius); display: block; border: 1px solid var(--border2); max-height: 150px; object-fit: cover; }
+    #remove-image { position: absolute; top: 7px; right: 7px; background: rgba(6,6,8,0.88); border: 1px solid var(--border2); color: var(--neon); border-radius: 5px; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; transition: all 0.15s; }
+    #remove-image:hover { background: var(--neon); color: #000; }
+
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+    .toggle-label { font-size: 0.84rem; color: var(--text); font-weight: 500; }
+    .toggle-sub { font-size: 0.68rem; color: var(--muted); margin-top: 2px; }
+    .toggle { position: relative; width: 42px; height: 23px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track { position: absolute; inset: 0; border-radius: 100px; background: var(--border2); cursor: pointer; transition: background 0.2s; }
+    .toggle input:checked + .toggle-track { background: var(--neon); box-shadow: 0 0 10px rgba(255,26,26,0.4); }
+    .toggle-thumb { position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: transform 0.2s; pointer-events: none; }
+    .toggle input:checked ~ .toggle-thumb { transform: translateX(19px); }
+
+    #device-lock-notice { display: none; font-family: 'Space Mono', monospace; font-size: 0.6rem; letter-spacing: 0.08em; color: var(--neon); padding: 7px 10px; border-radius: var(--radius); background: rgba(255,26,26,0.06); border: 1px solid rgba(255,26,26,0.2); text-align: center; margin-bottom: 10px; }
+    #device-lock-notice.show { display: block; }
+
+    .format-label { font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+    .format-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .format-btn { padding: 12px 10px; border-radius: var(--radius); border: 1px solid var(--border2); background: var(--bg); color: var(--muted); font-family: 'Space Mono', monospace; font-size: 0.68rem; letter-spacing: 0.04em; cursor: pointer; transition: all 0.18s; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .format-btn:hover { border-color: var(--metallic); color: var(--text); }
+    .format-btn.active { border-color: var(--neon); color: var(--neon); background: rgba(255,26,26,0.07); box-shadow: 0 0 14px rgba(255,26,26,0.08); }
+    .format-btn .fmt-icon { font-size: 1.1rem; line-height: 1; }
+    .format-btn .fmt-size { font-size: 0.55rem; color: var(--muted); }
+    .format-btn.active .fmt-size { color: rgba(255,26,26,0.6); }
+    .format-btn.locked { opacity: 0.28; cursor: not-allowed; pointer-events: none; }
+
+    #apply-btn { width: 100%; padding: 12px; background: rgba(255,26,26,0.08); border: 1px solid rgba(255,26,26,0.35); color: var(--neon); border-radius: var(--radius); font-family: 'Space Mono', monospace; font-size: 0.76rem; letter-spacing: 0.1em; cursor: pointer; transition: all 0.18s; text-transform: uppercase; margin-top: 14px; }
+    #apply-btn:hover { background: rgba(255,26,26,0.15); box-shadow: 0 0 20px rgba(255,26,26,0.15); }
+    #apply-btn:disabled { opacity: 0.28; cursor: not-allowed; pointer-events: none; }
+
+    /* ══ CTA BUTTONS ══ */
+    .cta-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+    #start-btn, #stop-btn { width: 100%; padding: 22px 24px; border-radius: var(--radius-lg); cursor: pointer; font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; letter-spacing: 0.16em; transition: all 0.22s; border: none; text-transform: uppercase; position: relative; overflow: hidden; }
+    #start-btn { background: linear-gradient(135deg, #ff1a1a 0%, #c0392b 60%, #7b0d0d 100%); color: #fff; box-shadow: 0 4px 32px rgba(255,26,26,0.35), 0 1px 0 rgba(255,255,255,0.1) inset; }
+    #start-btn::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, transparent 60%); border-radius: inherit; }
+    #start-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 40px rgba(255,26,26,0.55), 0 1px 0 rgba(255,255,255,0.1) inset; }
+    #start-btn:disabled { background: var(--surface2); color: var(--muted2); box-shadow: none; cursor: not-allowed; }
+    #stop-btn { background: linear-gradient(135deg, #2d0505 0%, #4a0a0a 50%, #1a0202 100%); color: #ff6b6b; border: 1px solid rgba(192,57,43,0.4); box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+    #stop-btn::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,26,26,0.08) 0%, transparent 60%); border-radius: inherit; }
+    #stop-btn:hover:not(:disabled) { background: linear-gradient(135deg, #5c1010 0%, #7b1515 50%, #3d0808 100%); color: #fff; border-color: var(--neon); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(255,26,26,0.25); }
+    #stop-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+
+    .shortcut-hint { text-align: center; font-family: 'Space Mono', monospace; font-size: 0.58rem; color: var(--muted2); letter-spacing: 0.08em; }
+    .shortcut-hint kbd { border: 1px solid var(--border2); border-radius: 3px; padding: 1px 5px; font-size: 0.58rem; background: var(--surface); color: var(--muted); }
+
+    /* ══ COIN BAR ══ */
+    .coin-bar-wrap { height: 4px; background: var(--border2); border-radius: 100px; overflow: hidden; margin-top: 12px; }
+    .coin-bar-fill { height: 100%; border-radius: 100px; background: var(--green); transition: width 0.5s, background 0.3s; }
+    .coin-bar-fill.mid { background: #ffb800; }
+    .coin-bar-fill.low { background: var(--neon); }
+
+    #coin-warning { display: none; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: rgba(255,26,26,0.07); border: 1px solid rgba(255,26,26,0.25); color: var(--neon); font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.06em; }
+    .coin-stats { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+    .coin-stat-label { font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+    .coin-stat-val { font-family: 'Space Mono', monospace; font-size: 0.82rem; color: var(--text); font-weight: 700; }
+    .drain-info { font-family: 'Space Mono', monospace; font-size: 0.58rem; color: var(--muted); margin-top: 6px; }
+
+    #buy-coins-btn { width: 100%; margin-top: 14px; padding: 11px; background: rgba(62,255,139,0.07); border: 1px solid rgba(62,255,139,0.3); color: var(--green); border-radius: var(--radius); font-family: 'Space Mono', monospace; font-size: 0.72rem; letter-spacing: 0.1em; cursor: pointer; transition: all 0.18s; text-transform: uppercase; }
+    #buy-coins-btn:hover { background: rgba(62,255,139,0.14); box-shadow: 0 0 16px rgba(62,255,139,0.1); }
+
+    /* ══ VOICE SECTION ══ */
+    #voice-section { margin-bottom: 14px; }
+    .voice-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+    .voice-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-radius: var(--radius); border: 1px solid var(--border2); background: var(--bg); transition: border-color 0.18s; gap: 12px; }
+    .voice-row:hover { border-color: var(--border2); }
+    .voice-row.active { border-color: var(--neon); background: rgba(255,26,26,0.04); }
+    .voice-row-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+    .voice-row-icon { font-size: 1.1rem; flex-shrink: 0; }
+    .voice-row-name { font-family: 'Space Mono', monospace; font-size: 0.72rem; letter-spacing: 0.04em; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .voice-row-badge { font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--border2); border-radius: 3px; padding: 2px 5px; flex-shrink: 0; }
+    .voice-row-btns { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+    .voice-play-btn { padding: 6px 13px; border-radius: 7px; border: 1px solid var(--border2); background: transparent; color: var(--muted); font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+    .voice-play-btn:hover { border-color: var(--green); color: var(--green); }
+    .voice-play-btn.playing { border-color: var(--green); color: var(--green); background: rgba(62,255,139,0.07); }
+    .voice-use-btn { padding: 6px 13px; border-radius: 7px; border: 1px solid var(--border2); background: transparent; color: var(--muted); font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+    .voice-use-btn:hover { border-color: var(--metallic); color: var(--text); }
+    .voice-use-btn.active { border-color: var(--neon); color: var(--neon); background: rgba(255,26,26,0.07); }
+    .voice-empty { font-family: 'Space Mono', monospace; font-size: 0.68rem; color: var(--muted); letter-spacing: 0.06em; padding: 16px 0; }
+
+    #voice-status { font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.06em; margin-top: 10px; }
+    #voice-status.warming { color: #ff8c42; }
+    #voice-status.active  { color: var(--green); }
+    #voice-status.error   { color: var(--neon); }
+
+    #request-voice-btn { margin-top: 12px; padding: 9px 16px; background: transparent; border: 1px solid var(--border2); color: var(--muted); border-radius: var(--radius); font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.08em; cursor: pointer; transition: all 0.18s; }
+    #request-voice-btn:hover { border-color: var(--neon); color: var(--neon); }
+
+    /* ══ TOAST ══ */
+    #toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(80px); background: #1a0505; border: 1px solid rgba(255,26,26,0.4); color: #ff8080; border-radius: var(--radius); padding: 12px 22px; font-family: 'Space Mono', monospace; font-size: 0.74rem; max-width: 440px; text-align: center; z-index: 10000; transition: transform 0.35s cubic-bezier(.2,.8,.4,1), opacity 0.35s; opacity: 0; box-shadow: 0 8px 30px rgba(0,0,0,0.5); pointer-events: none; }
+    #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+    #toast.green { background: rgba(6,20,12,0.95); border-color: rgba(62,255,139,0.4); color: var(--green); }
+    .divider { border: none; border-top: 1px solid var(--border); }
+
+    /* ══ MODALS ══ */
+    .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 20000; background: rgba(6,6,8,0.9); backdrop-filter: blur(10px); align-items: center; justify-content: center; padding: 24px; }
+    .modal-backdrop.open { display: flex; animation: backdrop-in 0.22s ease; }
+    @keyframes backdrop-in { from{opacity:0} to{opacity:1} }
+    .modal-box { width: 100%; max-width: 520px; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg); position: relative; overflow: hidden; animation: modal-in 0.26s cubic-bezier(.2,.8,.4,1); box-shadow: 0 24px 80px rgba(0,0,0,0.7); }
+    @keyframes modal-in { from{opacity:0;transform:scale(0.95) translateY(10px)} to{opacity:1;transform:scale(1) translateY(0)} }
+    .modal-box::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,26,26,0.4), transparent); }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 16px; border-bottom: 1px solid var(--border); }
+    .modal-title { font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
+    .modal-close { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--border2); background: transparent; color: var(--muted); cursor: pointer; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+    .modal-close:hover { background: rgba(255,26,26,0.1); border-color: rgba(255,26,26,0.3); color: var(--neon); }
+    .modal-body { padding: 24px; }
+
+    /* ── COIN PACKAGES ── */
+    .packages-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+    .pkg-card { background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius); padding: 18px 16px; text-align: center; cursor: pointer; transition: all 0.18s; position: relative; }
+    .pkg-card:hover { border-color: var(--metallic); background: rgba(192,57,43,0.04); }
+    .pkg-card.selected { border-color: var(--neon); background: rgba(255,26,26,0.07); }
+    .pkg-coins { font-family: 'Bebas Neue', sans-serif; font-size: 2rem; letter-spacing: 0.06em; color: var(--text); line-height: 1; }
+    .pkg-label { font-family: 'Space Mono', monospace; font-size: 0.55rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+    .pkg-naira { font-family: 'Space Mono', monospace; font-size: 0.78rem; color: var(--green); font-weight: 700; }
+    .pkg-usd   { font-family: 'Space Mono', monospace; font-size: 0.58rem; color: var(--muted); margin-top: 2px; }
+    .pkg-badge { position: absolute; top: -1px; right: 10px; background: var(--neon); color: #fff; font-family: 'Space Mono', monospace; font-size: 0.5rem; letter-spacing: 0.1em; text-transform: uppercase; padding: 3px 8px; border-radius: 0 0 6px 6px; }
+
+    /* ── CRYPTO PAYMENT ── */
+    .network-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+    .net-tab { flex: 1; padding: 10px 8px; border-radius: var(--radius); border: 1px solid var(--border2); background: var(--bg); color: var(--muted); font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s; text-align: center; }
+    .net-tab:hover { border-color: var(--metallic); color: var(--text); }
+    .net-tab.active { border-color: var(--neon); color: var(--neon); background: rgba(255,26,26,0.07); }
+    .wallet-box { background: var(--bg); border: 1px solid var(--border2); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
+    .wallet-label { font-family: 'Space Mono', monospace; font-size: 0.55rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+    .wallet-addr { font-family: 'Space Mono', monospace; font-size: 0.72rem; color: var(--text); word-break: break-all; line-height: 1.6; }
+    .wallet-amount { font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; color: var(--green); margin-top: 8px; letter-spacing: 0.06em; }
+    .copy-addr-btn { margin-top: 10px; width: 100%; padding: 9px; background: transparent; border: 1px solid var(--border2); color: var(--muted); border-radius: 7px; font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.08em; cursor: pointer; transition: all 0.15s; }
+    .copy-addr-btn:hover { border-color: var(--green); color: var(--green); }
+    .tx-input-wrap { margin-bottom: 16px; }
+    .tx-label { font-family: 'Space Mono', monospace; font-size: 0.55rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 7px; }
+    #tx-hash-input { font-size: 0.72rem; }
+    .verify-btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #ff1a1a 0%, #c0392b 60%, #7b0d0d 100%); border: none; border-radius: var(--radius); color: #fff; font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 0.18em; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 24px rgba(255,26,26,0.3); }
+    .verify-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 32px rgba(255,26,26,0.5); }
+    .verify-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .pay-note { font-family: 'Space Mono', monospace; font-size: 0.58rem; color: var(--muted); letter-spacing: 0.04em; line-height: 1.7; margin-top: 14px; text-align: center; }
+
+    /* ── VOICE REQUEST MODAL ── */
+    .modal-field { margin-bottom: 14px; }
+    .modal-field label { display: block; font-family: 'Space Mono', monospace; font-size: 0.55rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 7px; }
+    .submit-voice-btn { width: 100%; padding: 13px; background: linear-gradient(135deg, #ff1a1a 0%, #c0392b 60%, #7b0d0d 100%); border: none; border-radius: var(--radius); color: #fff; font-family: 'Bebas Neue', sans-serif; font-size: 1rem; letter-spacing: 0.16em; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 20px rgba(255,26,26,0.25); margin-top: 4px; }
+    .submit-voice-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(255,26,26,0.45); }
+    .submit-voice-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .voice-req-note { font-family: 'Space Mono', monospace; font-size: 0.6rem; color: var(--muted); letter-spacing: 0.04em; line-height: 1.7; margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: rgba(255,26,26,0.04); border: 1px solid rgba(255,26,26,0.12); }
+
+    /* ── WELCOME MODAL ── */
+    .welcome-box { text-align: center; padding: 36px 28px 28px; }
+    .welcome-icon { font-size: 3rem; margin-bottom: 16px; }
+    .welcome-title { font-family: 'Bebas Neue', sans-serif; font-size: 2rem; letter-spacing: 0.1em; color: var(--text); margin-bottom: 6px; }
+    .welcome-sub { font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 24px; }
+    .welcome-coins { font-family: 'Bebas Neue', sans-serif; font-size: 3.5rem; color: var(--green); letter-spacing: 0.06em; line-height: 1; text-shadow: 0 0 30px rgba(62,255,139,0.4); }
+    .welcome-coins-label { font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(62,255,139,0.7); margin-bottom: 24px; margin-top: 4px; }
+    .welcome-dismiss { width: 100%; padding: 14px; background: linear-gradient(135deg, #ff1a1a 0%, #c0392b 60%, #7b0d0d 100%); border: none; border-radius: var(--radius); color: #fff; font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 0.18em; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 24px rgba(255,26,26,0.3); }
+    .welcome-dismiss:hover { transform: translateY(-1px); box-shadow: 0 6px 32px rgba(255,26,26,0.5); }
+
+    /* ══ AUTH ══ */
+    #auth-wall { position: fixed; inset: 0; z-index: 50000; background: #060608; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; overflow: hidden; }
+    #auth-wall::before { content: ''; position: absolute; inset: 0; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E"); pointer-events: none; opacity: 0.5; }
+    #auth-wall::after { content: ''; position: absolute; top: -200px; left: 50%; transform: translateX(-50%); width: 900px; height: 500px; background: radial-gradient(ellipse, rgba(255,26,26,0.09) 0%, transparent 70%); pointer-events: none; }
+    .auth-container { position: relative; z-index: 1; width: 100%; max-width: 440px; padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 28px; }
+    .auth-logo-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .auth-logo-sub { font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.28em; text-transform: uppercase; color: #55556a; }
+    .auth-card { width: 100%; background: #0d0d10; border: 1px solid #1f1f26; border-radius: 18px; padding: 36px 32px 32px; position: relative; overflow: hidden; }
+    .auth-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,26,26,0.4), transparent); }
+    .auth-heading { font-family: 'Bebas Neue', sans-serif; font-size: 2rem; letter-spacing: 0.1em; color: #f0f0f5; margin-bottom: 6px; line-height: 1; }
+    .auth-sub { font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: #55556a; margin-bottom: 28px; }
+    .auth-field { margin-bottom: 16px; }
+    .auth-label { font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.18em; text-transform: uppercase; color: #55556a; display: block; margin-bottom: 7px; }
+    .auth-input { width: 100%; background: #060608; border: 1px solid #2a2a35; border-radius: 10px; padding: 12px 14px; color: #f0f0f5; font-family: 'Space Mono', monospace; font-size: 0.82rem; outline: none; transition: border-color 0.2s, box-shadow 0.2s; box-sizing: border-box; }
+    .auth-input:focus { border-color: #ff1a1a; box-shadow: 0 0 0 3px rgba(255,26,26,0.08); }
+    .auth-input::placeholder { color: #38384a; }
+    .auth-btn { width: 100%; margin-top: 8px; padding: 15px 24px; background: linear-gradient(135deg, #ff1a1a 0%, #c0392b 60%, #7b0d0d 100%); border: none; border-radius: 10px; color: #fff; font-family: 'Bebas Neue', sans-serif; font-size: 1.1rem; letter-spacing: 0.2em; cursor: pointer; transition: all 0.22s; box-shadow: 0 4px 28px rgba(255,26,26,0.3); position: relative; overflow: hidden; }
+    .auth-btn::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 60%); }
+    .auth-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 36px rgba(255,26,26,0.5); }
+    .auth-error { display: none; margin-top: 14px; padding: 11px 14px; border-radius: 8px; background: rgba(123,13,13,0.3); border: 1px solid rgba(255,26,26,0.3); color: #ff6b6b; font-family: 'Space Mono', monospace; font-size: 0.68rem; letter-spacing: 0.04em; line-height: 1.6; text-align: center; }
+    .auth-error.show { display: block; }
+    .auth-pro-banner { width: 100%; background: linear-gradient(135deg, #0d0d10 0%, #150505 50%, #0d0d10 100%); border: 1px solid rgba(255,26,26,0.25); border-radius: 14px; padding: 18px 22px; display: flex; align-items: center; gap: 16px; cursor: default; transition: box-shadow 0.3s, border-color 0.3s; position: relative; overflow: hidden; }
+    .auth-pro-banner::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,26,26,0.35), transparent); }
+    .auth-pro-banner:hover { border-color: rgba(255,26,26,0.5); box-shadow: 0 0 28px rgba(255,26,26,0.12), 0 0 60px rgba(255,26,26,0.05); }
+    .pro-icon { font-size: 1.6rem; flex-shrink: 0; filter: drop-shadow(0 0 8px rgba(255,26,26,0.6)); }
+    .pro-text { flex: 1; }
+    .pro-title { font-family: 'Bebas Neue', sans-serif; font-size: 1.25rem; letter-spacing: 0.12em; color: #ff1a1a; text-shadow: 0 0 20px rgba(255,26,26,0.4); line-height: 1; }
+    .pro-tagline { font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.1em; color: #55556a; margin-top: 4px; }
+    .pro-arrow { font-size: 0.9rem; color: rgba(255,26,26,0.4); flex-shrink: 0; }
+
+    #auth-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(80px); background: #1a0505; border: 1px solid rgba(255,26,26,0.4); color: #ff8080; border-radius: 10px; padding: 13px 24px; font-family: 'Space Mono', monospace; font-size: 0.74rem; max-width: 380px; text-align: center; z-index: 60000; transition: transform 0.35s cubic-bezier(.2,.8,.4,1), opacity 0.35s; opacity: 0; box-shadow: 0 8px 30px rgba(0,0,0,0.5); pointer-events: none; white-space: nowrap; }
+    #auth-toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+    #auth-wall.fade-out { opacity: 0; transition: opacity 0.6s ease; pointer-events: none; }
+
+    #user-chip { display: none; align-items: center; gap: 8px; font-family: 'Space Mono', monospace; font-size: 0.62rem; letter-spacing: 0.08em; color: #55556a; }
+    #user-chip .user-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,26,26,0.5); flex-shrink: 0; }
+
+    #side-nav { display: none; position: fixed; right: 20px; top: 50%; transform: translateY(-50%); z-index: 1000; flex-direction: column; align-items: center; gap: 6px; background: #0d0d10; border: 1px solid #1f1f26; border-radius: 100px; padding: 12px 8px; box-shadow: 0 8px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,26,26,0.06); }
+    .side-nav-btn { width: 38px; height: 38px; border-radius: 50%; border: 1px solid transparent; background: transparent; color: #55556a; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; transition: all 0.18s; position: relative; }
+    .side-nav-btn:hover { background: rgba(255,26,26,0.1); border-color: rgba(255,26,26,0.3); color: #ff1a1a; }
+    .side-nav-btn[data-tip]::after { content: attr(data-tip); position: absolute; right: calc(100% + 12px); top: 50%; transform: translateY(-50%); background: #0d0d10; border: 1px solid #2a2a35; color: #f0f0f5; font-family: 'Space Mono', monospace; font-size: 0.58rem; letter-spacing: 0.1em; padding: 5px 10px; border-radius: 6px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+    .side-nav-btn:hover::after { opacity: 1; }
+    .side-nav-divider { width: 20px; height: 1px; background: #1f1f26; flex-shrink: 0; }
+
+    #help-modal-backdrop { display: none; position: fixed; inset: 0; z-index: 40000; background: rgba(6,6,8,0.88); backdrop-filter: blur(8px); align-items: center; justify-content: center; padding: 24px; }
+    #help-modal-backdrop.open { display: flex; animation: backdrop-in 0.25s ease; }
+    #help-modal { width: 100%; max-width: 860px; height: min(80vh, 700px); background: #0d0d10; border: 1px solid #2a2a35; border-radius: 18px; display: flex; flex-direction: column; overflow: hidden; position: relative; animation: modal-in 0.28s cubic-bezier(.2,.8,.4,1); box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,26,26,0.08); }
+    .help-modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid #1f1f26; flex-shrink: 0; }
+    .help-modal-title { font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase; color: #55556a; display: flex; align-items: center; gap: 10px; }
+    .help-modal-title span { color: #ff1a1a; font-size: 0.8rem; }
+    .help-modal-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid #2a2a35; background: transparent; color: #55556a; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+    .help-modal-close:hover { background: rgba(255,26,26,0.1); border-color: rgba(255,26,26,0.3); color: #ff1a1a; }
+    .help-modal-body { flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    .help-placeholder { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 40px; text-align: center; }
+    .help-placeholder-icon { font-size: 2.5rem; filter: drop-shadow(0 0 12px rgba(255,26,26,0.3)); }
+    .help-placeholder-title { font-family: 'Bebas Neue', sans-serif; font-size: 1.4rem; letter-spacing: 0.1em; color: #f0f0f5; }
+    .help-placeholder-sub { font-family: 'Space Mono', monospace; font-size: 0.68rem; letter-spacing: 0.08em; color: #55556a; line-height: 1.8; max-width: 320px; }
+    .help-placeholder-badge { padding: 8px 18px; border-radius: 100px; border: 1px solid #2a2a35; font-family: 'Space Mono', monospace; font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: #38384a; }
+
+    @media (max-width: 960px) { .main { padding: 24px 20px 48px; } header { padding: 0 20px; } .controls-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 680px) { .video-grid { grid-template-columns: 1fr; } .controls-grid { grid-template-columns: 1fr; } .controls-row { grid-template-columns: 1fr; } .cta-row { grid-template-columns: 1fr; } .packages-grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+
+  <!-- ══ HEADER ══ -->
+  <header>
+    <div class="logo-wrap">
+      <svg class="marv-logo" viewBox="0 0 160 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <filter id="glow" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <filter id="glow2" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <clipPath id="clip-main"><rect x="0" y="0" width="160" height="42"/></clipPath>
+          <clipPath id="clip-top"><rect x="0" y="0" width="160" height="14"/></clipPath>
+          <clipPath id="clip-mid"><rect x="0" y="14" width="160" height="10"/></clipPath>
+        </defs>
+        <text x="2" y="34" font-family="'Bebas Neue', sans-serif" font-size="38" fill="#ff1a1a" opacity="0.25" filter="url(#glow2)">MARV</text>
+        <g clip-path="url(#clip-main)"><text x="1" y="34" font-family="'Bebas Neue', sans-serif" font-size="38" fill="#ff1a1a" filter="url(#glow)" letter-spacing="2">MARV</text></g>
+        <g clip-path="url(#clip-top)"><text x="1" y="34" font-family="'Bebas Neue', sans-serif" font-size="38" fill="#ff6b6b" letter-spacing="2" opacity="0"><animate attributeName="opacity" values="0;0;1;0;0;0;1;0" dur="4s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="translate" values="0,0;3,0;-2,0;0,0" dur="4s" repeatCount="indefinite"/>MARV</text></g>
+        <g clip-path="url(#clip-mid)"><text x="1" y="34" font-family="'Bebas Neue', sans-serif" font-size="38" fill="#7b0d0d" letter-spacing="2" opacity="0"><animate attributeName="opacity" values="0;0;0;1;0;0;0;1;0" dur="5.5s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="translate" values="0,0;-4,0;2,0;0,0" dur="5.5s" repeatCount="indefinite"/>MARV</text></g>
+        <rect x="0" y="0" width="160" height="1.5" fill="rgba(255,26,26,0.55)"><animateTransform attributeName="transform" type="translate" values="0,-5;0,48;0,-5" dur="3s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;0.9;0" dur="3s" repeatCount="indefinite"/></rect>
+      </svg>
+      <div>
+        <div class="logo-signal">
+          <div class="logo-signal-bar"></div><div class="logo-signal-bar"></div><div class="logo-signal-bar"></div><div class="logo-signal-bar"></div><div class="logo-signal-bar"></div>
+        </div>
+        <div class="logo-sub">Realtime AI Transform</div>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div id="user-chip"><span class="user-dot"></span><span id="user-email-display"></span></div>
+      <div id="coin-chip" title="Buy more coins">
+        <span class="coin-icon">◈</span>
+        <span id="coin-balance">0</span>
+        <span style="color:var(--muted);font-size:0.55rem">coins</span>
+      </div>
+      <div id="status-badge"><span class="dot"></span><span id="status-text">IDLE</span></div>
+    </div>
+  </header>
+
+  <!-- ══ MAIN ══ -->
+  <div class="main">
+
+    <!-- VIDEO -->
+    <div class="section-heading">
+      <span class="section-heading-text">Live Feed</span>
+      <div class="section-heading-line"></div>
+      <span class="section-heading-text">1920 × 1080</span>
+    </div>
+    <div class="video-grid">
+      <div class="video-panel">
+        <div class="panel-label">INPUT · WEBCAM</div>
+        <video id="input-video" autoplay muted playsinline></video>
+        <div id="input-placeholder" class="video-placeholder">
+          <svg width="48" height="48" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="1.2" stroke-linecap="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.9L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/></svg>
+          <span>Camera inactive</span>
+        </div>
+        <div class="res-badge">1920 × 1080</div>
+      </div>
+      <div class="video-panel output-panel" id="output-panel">
+        <div class="panel-label" id="output-label">OUTPUT · AI TRANSFORM</div>
+        <video id="output-video" autoplay muted playsinline></video>
+        <div id="output-placeholder" class="video-placeholder">
+          <svg width="48" height="48" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+          <span>Awaiting stream</span>
+        </div>
+        <div id="billing-counter">⏱ <span id="billing-secs">0</span>s billed</div>
+        <div class="res-badge">1920 × 1080</div>
+      </div>
+    </div>
+
+    <!-- CONTROLS ROW 1 -->
+    <div class="section-heading">
+      <span class="section-heading-text">Controls</span>
+      <div class="section-heading-line"></div>
+    </div>
+    <div class="controls-grid">
+      <!-- COINS CARD (replaces API key card) -->
+      <div class="card">
+        <div class="card-title"><div class="card-title-icon">◈</div>Coins Balance</div>
+        <div class="coin-stats">
+          <div><div class="coin-stat-label">Available</div><div class="coin-stat-val" id="coin-balance-main">0</div></div>
+          <div style="text-align:right"><div class="coin-stat-label">Mode</div><div class="coin-stat-val" id="drain-mode-label" style="font-size:0.65rem;color:var(--muted)">—</div></div>
+        </div>
+        <div class="coin-bar-wrap"><div class="coin-bar-fill" id="coin-bar-fill" style="width:0%"></div></div>
+        <div id="coin-warning">⚠ Running low — buy more coins</div>
+        <div class="drain-info" id="drain-info">Video: 1 coin/sec &nbsp;·&nbsp; Video+Voice: 2.5 coins/sec</div>
+        <button id="buy-coins-btn">+ Buy Coins</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><div class="card-title-icon">✦</div>Transform Prompt</div>
+        <textarea id="prompt-input" rows="3" placeholder="e.g. Transform me into the person in the reference image">Transform me into the person in the reference image.</textarea>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><div class="card-title-icon">⚡</div>Quick Presets</div>
+        <div class="presets">
+          <button class="preset-btn" data-prompt="Transform me into an anime character with large expressive eyes and vibrant hair. High quality animation style.">✦ Anime</button>
+          <button class="preset-btn" data-prompt="Transform me into a cyberpunk character with neon face implants, chrome accessories, and futuristic urban style.">⚡ Cyber</button>
+          <button class="preset-btn" data-prompt="Make me look photorealistic but enhance my features with cinematic lighting and natural skin texture.">◎ Real</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTROLS ROW 2 -->
+    <div class="controls-row">
+      <div class="card">
+        <div class="card-title"><div class="card-title-icon">🖼</div>Reference Image <span style="color:rgba(255,26,26,0.6);font-size:0.52rem;margin-left:2px;letter-spacing:0.1em">IDENTITY TRANSFER</span></div>
+        <div id="upload-zone" class="upload-zone">
+          <input type="file" id="image-upload" accept="image/*" />
+          <div class="upload-zone-inner">
+            <svg width="26" height="26" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+            <div><strong>Upload face image</strong></div>
+            <div style="font-size:0.66rem;color:var(--muted)">JPG, PNG, WEBP · drag &amp; drop or click</div>
+          </div>
+        </div>
+        <div id="image-preview-wrap"><img id="image-preview" alt="Reference" /><button id="remove-image" title="Remove image">✕</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><div class="card-title-icon">⚙</div>Settings</div>
+        <div class="toggle-row" style="margin-bottom:20px">
+          <div><div class="toggle-label">Enhance</div><div class="toggle-sub">Quality boost on reference image</div></div>
+          <label class="toggle"><input type="checkbox" id="enhance-toggle" checked /><span class="toggle-track"></span><span class="toggle-thumb"></span></label>
+        </div>
+        <hr class="divider" style="margin-bottom:18px" />
+        <div class="format-label">Output Format</div>
+        <div id="device-lock-notice"></div>
+        <div class="format-btns">
+          <button class="format-btn active" id="fmt-laptop" data-format="laptop"><span class="fmt-icon">💻</span><span>Laptop</span><span class="fmt-size">1280 × 720</span></button>
+          <button class="format-btn" id="fmt-mobile" data-format="mobile"><span class="fmt-icon">📱</span><span>Mobile</span><span class="fmt-size">1080 × 1920</span></button>
+        </div>
+        <button id="apply-btn" disabled>⟳ Apply Settings</button>
+      </div>
+    </div>
+
+    <!-- VOICE SECTION -->
+    <div id="voice-section">
+      <div class="section-heading">
+        <span class="section-heading-text">Voice Models</span>
+        <div class="section-heading-line"></div>
+        <span class="section-heading-text" id="voice-status"></span>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="card-title-icon">🎙</div>Select Voice</div>
+        <div class="voice-list" id="voice-grid">
+          <div class="voice-empty">Loading voices…</div>
+        </div>
+        <button id="request-voice-btn">+ Request Custom Voice</button>
+      </div>
+    </div>
+
+    <!-- CTA -->
+    <div class="cta-row">
+      <button id="start-btn">▶ &nbsp;Start Stream</button>
+      <button id="stop-btn" disabled>■ &nbsp;Stop Stream</button>
+    </div>
+    <div class="shortcut-hint">Press <kbd>Q</kbd> to stop stream</div>
+
+  </div>
+
+  <div id="toast"></div>
+  <div id="auth-toast"></div>
+
+  <!-- ══ BUY COINS MODAL ══ -->
+  <div class="modal-backdrop" id="buy-coins-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">◈ Buy Coins</div>
+        <button class="modal-close" id="close-buy-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="packages-grid" id="packages-grid">
+          <div style="grid-column:1/-1;text-align:center;color:var(--muted);font-family:'Space Mono',monospace;font-size:0.7rem;padding:20px">Loading packages…</div>
+        </div>
+        <div id="pay-section" style="display:none">
+          <div class="network-tabs">
+            <button class="net-tab active" data-net="trc20">USDT TRC20</button>
+            <button class="net-tab" data-net="erc20">USDT ERC20</button>
+            <button class="net-tab" data-net="btc">Bitcoin</button>
+          </div>
+          <div class="wallet-box">
+            <div class="wallet-label">Send exactly to this address</div>
+            <div class="wallet-addr" id="wallet-addr">—</div>
+            <div class="wallet-amount" id="wallet-amount">—</div>
+            <button class="copy-addr-btn" id="copy-addr-btn">📋 Copy Address</button>
+          </div>
+          <div class="tx-input-wrap">
+            <label class="tx-label">Transaction Hash / TXID</label>
+            <input type="text" id="tx-hash-input" placeholder="Paste your transaction hash here…" />
+          </div>
+          <button class="verify-btn" id="verify-btn">Verify Payment</button>
+          <div class="pay-note">After sending, paste the transaction hash above and click Verify.<br>Coins are added automatically once confirmed on-chain.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ VOICE REQUEST MODAL ══ -->
+  <div class="modal-backdrop" id="voice-request-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">🎤 Request Voice Model</div>
+        <button class="modal-close" id="close-voice-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-field">
+          <label>Voice Name</label>
+          <input type="text" id="req-voice-name" placeholder="e.g. Morgan Freeman" />
+        </div>
+        <div class="modal-field">
+          <label>Audio Sample URL</label>
+          <input type="text" id="req-audio-url" placeholder="Link to your audio sample (Google Drive, Dropbox, etc.)" />
+        </div>
+        <div class="modal-field">
+          <label>Notes (optional)</label>
+          <textarea id="req-notes" rows="2" placeholder="Any specific details about the voice…" style="min-height:60px"></textarea>
+        </div>
+        <button class="submit-voice-btn" id="submit-voice-request">Submit &amp; Pay Training Fee</button>
+        <div class="voice-req-note">
+          ⏱ Voice models are delivered within <strong>48 hours</strong> of payment.<br>
+          A one-time training fee applies. You will be redirected to pay after submitting.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ WELCOME MODAL (first login) ══ -->
+  <div class="modal-backdrop" id="welcome-modal">
+    <div class="modal-box" style="max-width:400px">
+      <div class="welcome-box">
+        <div class="welcome-icon">🎉</div>
+        <div class="welcome-title">Welcome to MARV</div>
+        <div class="welcome-sub">You've been credited with free coins to get started</div>
+        <div class="welcome-coins" id="welcome-coins-val">2,000</div>
+        <div class="welcome-coins-label">Free Coins Added</div>
+        <button class="welcome-dismiss" id="welcome-dismiss">Let's Go</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ AUTH WALL ══ -->
+  <div id="auth-wall">
+    <div class="auth-container">
+      <div class="auth-logo-wrap">
+        <svg class="marv-logo" viewBox="0 0 160 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="glow-a" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="2.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="glow2-a" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <clipPath id="clip-main-a"><rect x="0" y="0" width="160" height="42"/></clipPath>
+            <clipPath id="clip-top-a"><rect x="0" y="0" width="160" height="14"/></clipPath>
+            <clipPath id="clip-mid-a"><rect x="0" y="14" width="160" height="10"/></clipPath>
+          </defs>
+          <text x="2" y="34" font-family="'Bebas Neue', sans-serif" font-size="38" fill="#ff1a1a" opacity="0.25" filter="url(#glow2-a)">MARV</text>
+          <g clip-path="url(#clip-main-a)"><text x="1" y="34" font-family="'Bebas Neue', sans-serif" font-size="38" fill="#ff1a1a" filter="url(#glow-a)" letter-spacing="2">MARV</text></g>
+          <g clip-path="url(#clip-top-a)"><text x="1" y="34" font-family="'Bebas Neue', sans-serif" font-size="38" fill="#ff6b6b" letter-spacing="2" opacity="0"><animate attributeName="opacity" values="0;0;1;0;0;0;1;0" dur="4s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="translate" values="0,0;3,0;-2,0;0,0" dur="4s" repeatCount="indefinite"/>MARV</text></g>
+          <g clip-path="url(#clip-mid-a)"><text x="1" y="34" font-family="'Bebas Neue', sans-serif" font-size="38" fill="#7b0d0d" letter-spacing="2" opacity="0"><animate attributeName="opacity" values="0;0;0;1;0;0;0;1;0" dur="5.5s" repeatCount="indefinite"/><animateTransform attributeName="transform" type="translate" values="0,0;-4,0;2,0;0,0" dur="5.5s" repeatCount="indefinite"/>MARV</text></g>
+          <rect x="0" y="0" width="160" height="1.5" fill="rgba(255,26,26,0.55)"><animateTransform attributeName="transform" type="translate" values="0,-5;0,48;0,-5" dur="3s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;0.9;0" dur="3s" repeatCount="indefinite"/></rect>
+        </svg>
+        <div class="auth-logo-sub">Realtime AI Transform</div>
+      </div>
+      <div class="auth-card">
+        <div class="auth-heading">Access Portal</div>
+        <div class="auth-sub">Enter your credentials to continue</div>
+        <div class="auth-field">
+          <label class="auth-label" for="auth-email">Email Address</label>
+          <input class="auth-input" type="email" id="auth-email" placeholder="you@example.com" autocomplete="email" spellcheck="false" />
+        </div>
+        <div class="auth-field">
+          <label class="auth-label" for="auth-password">Access Code</label>
+          <input class="auth-input" type="password" id="auth-password" placeholder="MARV-XXXX-XXXX" autocomplete="current-password" spellcheck="false" />
+        </div>
+        <button class="auth-btn" id="auth-submit">ENTER MARV</button>
+        <div class="auth-error" id="auth-error"></div>
+      </div>
+      <div class="auth-pro-banner" id="pro-banner">
+        <div class="pro-icon">👑</div>
+        <div class="pro-text"><div class="pro-title">GO PRO</div><div class="pro-tagline">Unlimited usage &amp; full access</div></div>
+        <div class="pro-arrow">›</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ SIDE NAV ══ -->
+  <div id="side-nav">
+    <button class="side-nav-btn" id="help-btn" data-tip="HELP">
+      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
+    </button>
+    <div class="side-nav-divider"></div>
+    <button class="side-nav-btn" id="logout-btn" data-tip="LOG OUT">
+      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1"/></svg>
+    </button>
+  </div>
+
+  <!-- ══ HELP MODAL ══ -->
+  <div id="help-modal-backdrop">
+    <div id="help-modal">
+      <div class="help-modal-header">
+        <div class="help-modal-title"><span>?</span> Documentation</div>
+        <button class="help-modal-close" id="help-modal-close">✕</button>
+      </div>
+      <div class="help-modal-body">
+        <div class="help-placeholder">
+          <div class="help-placeholder-icon">📄</div>
+          <div class="help-placeholder-title">Documentation Coming Soon</div>
+          <div class="help-placeholder-sub">We're preparing the MARV user guide.<br>Check back soon for full documentation.</div>
+          <div class="help-placeholder-badge">Being Prepared</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── DEVICE DETECTION & FORMAT LOCK ──────────────────────────
+    (function() {
+      const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+        || (navigator.maxTouchPoints > 1 && /MacIntel/.test(navigator.platform))
+        || window.innerWidth <= 768;
+      const laptopBtn = document.getElementById("fmt-laptop");
+      const mobileBtn = document.getElementById("fmt-mobile");
+      const notice    = document.getElementById("device-lock-notice");
+      if (isMobile) {
+        mobileBtn.classList.add("active"); laptopBtn.classList.remove("active"); laptopBtn.classList.add("locked");
+        notice.textContent = "📱 Mobile detected — Mobile View auto-selected"; notice.classList.add("show");
+        window.__forcedFormat = "mobile";
+      } else {
+        laptopBtn.classList.add("active"); mobileBtn.classList.remove("active"); mobileBtn.classList.add("locked");
+        notice.textContent = "💻 Laptop detected — Laptop View auto-selected"; notice.classList.add("show");
+        window.__forcedFormat = "laptop";
+      }
+      const outputPanel = document.getElementById("output-panel");
+      const outputLabel = document.getElementById("output-label");
+      const outputVid   = document.getElementById("output-video");
+      function checkLive() {
+        if (outputVid && outputVid.srcObject) {
+          outputPanel.classList.add("active"); outputLabel.classList.add("live-label");
+          outputLabel.innerHTML = '<span class="live-dot"></span>LIVE · AI OUTPUT';
+        } else {
+          outputPanel.classList.remove("active"); outputLabel.classList.remove("live-label");
+          outputLabel.textContent = 'OUTPUT · AI TRANSFORM';
+        }
+      }
+      setInterval(checkLive, 800);
+    })();
+  </script>
+  <script type="module" src="index.js"></script>
+
+  <!-- ══ AUTH SYSTEM ══ -->
+  <script type="module">
+    import { AUTHORIZED_DEVICES } from './auth.js';
+    const SESSION_KEY = 'marv_session';
+
+    async function getFingerprint() {
+      const DEVICE_ID_KEY = 'marv_device_id';
+      let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+      if (!deviceId) {
+        const arr = new Uint8Array(32); crypto.getRandomValues(arr);
+        deviceId = Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
+        localStorage.setItem(DEVICE_ID_KEY, deviceId);
+      }
+      return deviceId;
+    }
+
+    async function fpCheck(email, fingerprint) {
+      try {
+        const res = await fetch('/api/fingerprint', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'check',email,fingerprint}) });
+        if (!res.ok) return 'error';
+        return (await res.json()).status || 'error';
+      } catch(e) { return 'error'; }
+    }
+
+    async function fpRegister(email, fingerprint) {
+      try {
+        const res = await fetch('/api/fingerprint', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'register',email,fingerprint}) });
+        if (!res.ok) return false;
+        return (await res.json()).status === 'registered';
+      } catch(e) { return false; }
+    }
+
+    async function findUserAnywhere(email, pass) {
+      const staticUser = AUTHORIZED_DEVICES.find(u => u.email.toLowerCase() === email && u.password === pass);
+      if (staticUser) return staticUser;
+      try {
+        const res = await fetch('/api/usercheck', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password: pass}) });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data.found) return null;
+        // Show welcome modal if first login
+        if (data.firstLogin && data.coinsGranted) {
+          document.getElementById('welcome-coins-val').textContent = data.coinsGranted.toLocaleString();
+          document.getElementById('welcome-modal').classList.add('open');
+        }
+        return { email: data.email, password: pass };
+      } catch(e) { return null; }
+    }
+
+    let heartbeatInterval = null;
+    function startHeartbeat(email) {
+      stopHeartbeat();
+      async function ping() {
+        try { await fetch('/api/usercheck', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'heartbeat', email}) }); } catch(e) {}
+      }
+      ping();
+      heartbeatInterval = setInterval(ping, 25000);
+    }
+    function stopHeartbeat() { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+
+    const authWall    = document.getElementById('auth-wall');
+    const sideNav     = document.getElementById('side-nav');
+    const userChip    = document.getElementById('user-chip');
+    const coinChip    = document.getElementById('coin-chip');
+    const userDisplay = document.getElementById('user-email-display');
+
+    function showApp(email) {
+      authWall.classList.add('fade-out');
+      setTimeout(() => authWall.style.display = 'none', 650);
+      sideNav.style.display = 'flex';
+      userChip.style.display = 'flex';
+      coinChip.style.display = 'flex';
+      userDisplay.textContent = email;
+      startHeartbeat(email);
+      // Fire event so index.js can load coins + voices
+      window.dispatchEvent(new CustomEvent('marv:logged-in', { detail: { email } }));
+    }
+
+    function showAuthWall() {
+      authWall.style.display = 'flex'; authWall.classList.remove('fade-out');
+      sideNav.style.display = 'none'; userChip.style.display = 'none'; coinChip.style.display = 'none';
+      localStorage.removeItem(SESSION_KEY); stopHeartbeat();
+    }
+
+    let authToastTimer;
+    function showAuthToast(msg) {
+      const t = document.getElementById('auth-toast');
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(authToastTimer);
+      authToastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    const emailInput = document.getElementById('auth-email');
+    const passInput  = document.getElementById('auth-password');
+    const submitBtn  = document.getElementById('auth-submit');
+    const errorDiv   = document.getElementById('auth-error');
+
+    function setError(msg) { errorDiv.textContent = msg; errorDiv.classList.add('show'); submitBtn.textContent = 'ENTER MARV'; submitBtn.disabled = false; }
+    function clearError() { errorDiv.classList.remove('show'); }
+    function setLoading(on) { submitBtn.textContent = on ? 'VERIFYING…' : 'ENTER MARV'; submitBtn.disabled = on; }
+
+    // Boot: re-validate returning user
+    (async function boot() {
+      const session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      if (!session) return;
+      const staticUser = AUTHORIZED_DEVICES.find(u => u.email === session.email);
+      let validUser = !!staticUser;
+      if (!validUser) {
+        try {
+          const res = await fetch('/api/usercheck', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email: session.email, sessionOnly: true}) });
+          if (res.ok) validUser = !!(await res.json()).exists;
+        } catch(e) {}
+      }
+      if (!validUser) { showAuthWall(); return; }
+      const fp = await getFingerprint();
+      if (await fpCheck(session.email, fp) === 'match') showApp(session.email);
+      else showAuthWall();
+    })();
+
+    async function attemptLogin() {
+      clearError();
+      const email = emailInput.value.trim().toLowerCase();
+      const pass  = passInput.value.trim();
+      if (!email || !pass) { setError('Please enter your email and access code.'); return; }
+      setLoading(true);
+      const user = await findUserAnywhere(email, pass);
+      if (!user) { setError('Invalid email or access code.'); setLoading(false); return; }
+      const fp     = await getFingerprint();
+      const result = await fpCheck(user.email, fp);
+      if (result === 'mismatch') { setError('This access code is registered to another device. Contact admin for a new code.'); setLoading(false); return; }
+      if (result === 'error')    { setError('Could not verify device. Please check your connection and try again.'); setLoading(false); return; }
+      if (result === 'new') {
+        const ok = await fpRegister(user.email, fp);
+        if (!ok) { setError('Could not register device. Please try again.'); setLoading(false); return; }
+      }
+      localStorage.setItem(SESSION_KEY, JSON.stringify({ email: user.email }));
+      showApp(user.email);
+    }
+
+    submitBtn.addEventListener('click', attemptLogin);
+    passInput.addEventListener('keydown',  e => { if (e.key === 'Enter') attemptLogin(); });
+    emailInput.addEventListener('keydown', e => { if (e.key === 'Enter') passInput.focus(); });
+
+    document.getElementById('logout-btn').addEventListener('click', () => { localStorage.removeItem(SESSION_KEY); showAuthWall(); });
+
+    const backdrop = document.getElementById('help-modal-backdrop');
+    document.getElementById('help-btn').addEventListener('click', () => backdrop.classList.add('open'));
+    document.getElementById('help-modal-close').addEventListener('click', () => backdrop.classList.remove('open'));
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) backdrop.classList.remove('open'); });
+
+    document.getElementById('pro-banner').addEventListener('click', () => showAuthToast('Unlimited usage, no restrictions — Coming Soon 🚀'));
+
+    // Welcome modal dismiss
+    document.getElementById('welcome-dismiss').addEventListener('click', () => document.getElementById('welcome-modal').classList.remove('open'));
+  </script>
+
+</body>
+</html>

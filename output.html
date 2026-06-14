@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MARV — Output</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── VIDEO: fills entire screen ── */
+    #output-video {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+      display: block;
+      transform: scaleX(-1);
+      background: #000;
+      z-index: 1;
+    }
+
+    /* ── WAITING / CLICK TO FULLSCREEN SCREEN ── */
+    #overlay {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 20px;
+      background: #08080d;
+      font-family: 'Space Mono', monospace;
+      color: #5a5a72;
+      z-index: 10;
+      cursor: pointer;
+      transition: opacity 0.5s;
+    }
+    #overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 36px; height: 36px;
+      border: 2px solid #1e1e2e;
+      border-top-color: #c8ff3e;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #overlay-title {
+      font-size: 0.9rem;
+      letter-spacing: 0.14em;
+      color: #e8e8f0;
+      text-transform: uppercase;
+    }
+    #overlay-sub {
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      color: #5a5a72;
+    }
+
+    /* tap/click pill */
+    #tap-pill {
+      display: none;
+      align-items: center; gap: 10px;
+      padding: 12px 24px; border-radius: 100px;
+      border: 1px solid #c8ff3e;
+      color: #c8ff3e;
+      font-size: 0.75rem; letter-spacing: 0.1em;
+      animation: glow 2s infinite;
+    }
+    #tap-pill.visible { display: flex; }
+    @keyframes glow {
+      0%,100% { box-shadow: 0 0 10px rgba(200,255,62,0.2); }
+      50%      { box-shadow: 0 0 24px rgba(200,255,62,0.5); }
+    }
+    #tap-pill .tap-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #c8ff3e;
+      animation: pulse 1.4s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ── ERROR SCREEN ── */
+    #error-screen {
+      display: none;
+      position: fixed; inset: 0;
+      flex-direction: column;
+      align-items: center; justify-content: center; gap: 20px;
+      background: #08080d;
+      font-family: 'Space Mono', monospace;
+      z-index: 20;
+      padding: 32px;
+      text-align: center;
+    }
+    #error-screen.show { display: flex; }
+
+    .error-icon {
+      font-size: 3rem;
+      margin-bottom: 4px;
+    }
+    .error-title {
+      font-size: 0.95rem;
+      letter-spacing: 0.14em;
+      color: #ff3e8f;
+      text-transform: uppercase;
+    }
+    .error-msg {
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      color: #5a5a72;
+      line-height: 1.8;
+      max-width: 320px;
+    }
+    .error-badge {
+      padding: 10px 20px; border-radius: 100px;
+      border: 1px solid #ff3e8f;
+      color: #ff3e8f;
+      font-size: 0.7rem; letter-spacing: 0.1em;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ERROR SCREEN: wrong device -->
+  <div id="error-screen">
+    <div class="error-icon">⚠</div>
+    <div class="error-title" id="error-title">Wrong Device</div>
+    <div class="error-msg" id="error-msg"></div>
+    <div class="error-badge" id="error-badge"></div>
+  </div>
+
+  <!-- OVERLAY: waiting + tap to fullscreen -->
+  <div id="overlay">
+    <div class="spinner" id="spinner"></div>
+    <div id="overlay-title">AWAITING STREAM…</div>
+    <div id="overlay-sub">Stream will appear here shortly</div>
+    <div id="tap-pill">
+      <span class="tap-dot"></span>
+      <span id="tap-label">TAP TO GO FULLSCREEN</span>
+    </div>
+  </div>
+
+  <!-- VIDEO OUTPUT -->
+  <video id="output-video" autoplay muted playsinline></video>
+
+  <script>
+    // ── DEVICE DETECTION ──────────────────────────────────────
+    const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      || (navigator.maxTouchPoints > 1 && /MacIntel/.test(navigator.platform))
+      || window.innerWidth <= 768;
+
+    const params       = new URLSearchParams(window.location.search);
+    const format       = params.get("format") || "laptop";
+
+    const video        = document.getElementById("output-video");
+    const overlay      = document.getElementById("overlay");
+    const spinner      = document.getElementById("spinner");
+    const overlayTitle = document.getElementById("overlay-title");
+    const overlaySub   = document.getElementById("overlay-sub");
+    const tapPill      = document.getElementById("tap-pill");
+    const tapLabel     = document.getElementById("tap-label");
+    const errorScreen  = document.getElementById("error-screen");
+    const errorMsg     = document.getElementById("error-msg");
+    const errorBadge   = document.getElementById("error-badge");
+
+    // ── DEVICE vs FORMAT MISMATCH CHECK ─────────────────────
+    if (format === "mobile" && !isMobile) {
+      errorScreen.classList.add("show");
+      overlay.style.display = "none";
+      document.getElementById("error-title").textContent = "Mobile Device Required";
+      errorMsg.innerHTML = "Mobile View is designed for phones.<br><br>Please open this link on your mobile phone to use Mobile View.";
+      errorBadge.textContent = "📱 OPEN ON YOUR PHONE";
+    } else if (format === "laptop" && isMobile) {
+      errorScreen.classList.add("show");
+      overlay.style.display = "none";
+      document.getElementById("error-title").textContent = "Laptop / Desktop Required";
+      errorMsg.innerHTML = "Laptop View is designed for laptops and desktops.<br><br>Please switch to Laptop View on your phone, or open on a laptop.";
+      errorBadge.textContent = "💻 OPEN ON A LAPTOP";
+    } else {
+
+      // ── CORRECT DEVICE: set up stream ───────────────────
+
+      // Update tap label based on device
+      tapLabel.textContent = isMobile ? "TAP TO GO FULLSCREEN" : "CLICK TO GO FULLSCREEN";
+
+      // ── FULLSCREEN ───────────────────────────────────────
+      let fullscreenTriggered = false;
+
+      function goFullscreen() {
+        if (fullscreenTriggered) return;
+        fullscreenTriggered = true;
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+        if (req) req.call(el).catch(() => {});
+      }
+
+      // Show tap pill — user must click/tap to trigger fullscreen
+      function showTapPrompt() {
+        spinner.style.display = "none";
+        overlayTitle.textContent = "STREAM READY";
+        overlaySub.textContent = isMobile ? "Tap anywhere to go fullscreen" : "Click anywhere to go fullscreen";
+        tapPill.classList.add("visible");
+        overlay.onclick = () => {
+          goFullscreen();
+          overlay.classList.add("hidden");
+        };
+      }
+
+      // ── BROADCAST CHANNEL ────────────────────────────────
+      const channel = new BroadcastChannel("lucy_stream");
+      channel.onmessage = (e) => {
+        if (e.data.type === "stream_ready") {
+          showTapPrompt();
+        }
+        if (e.data.type === "stream_stopped") {
+          video.srcObject = null;
+          overlay.classList.remove("hidden");
+          overlay.onclick = null;
+          tapPill.classList.remove("visible");
+          spinner.style.display = "block";
+          overlayTitle.textContent = "AWAITING STREAM…";
+          overlaySub.textContent = "Stream will appear here shortly";
+          fullscreenTriggered = false;
+          if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        }
+      };
+
+      // ── POLL OPENER FOR STREAM ────────────────────────────
+      function checkForStream() {
+        try {
+          if (window.opener && window.opener.lucyOutputStream) {
+            const stream = window.opener.lucyOutputStream;
+            video.srcObject = stream;
+            showTapPrompt();
+            return;
+          }
+        } catch (e) {}
+        setTimeout(checkForStream, 300);
+      }
+      checkForStream();
+    }
+  </script>
+</body>
+</html>

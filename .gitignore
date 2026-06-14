@@ -1,0 +1,7 @@
+node_modules/
+rvc/
+.claude/
+models/
+*.log
+.env
+.env.local
