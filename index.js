@@ -162,6 +162,7 @@ let referenceBase64    = null;
 let isConnected        = false;
 let settingsApplied    = false;
 let frameInFlightTimer = null;
+let sessionFrameCount  = 0;
 let outputTab       = null;
 let selectedFormat  = window.__forcedFormat || "laptop";
 let currentEmail    = null;
@@ -532,13 +533,13 @@ function startFrameLoop() {
       const imageUrl = captureCanvas.toDataURL("image/jpeg", 0.88);
       const prompt = promptInput.value.trim() ||
         "Transform me into the person in the reference image. Keep background unchanged.";
+      sessionFrameCount++;
       const payload = { prompt, image_url: imageUrl };
-      // Send reference once per full stream session (not per WS reconnect)
-      const sendingRef = !!(referenceBase64 && !settingsApplied);
+      // Send reference on frame 1, then every 5 frames to keep model anchored
+      const sendingRef = !!(referenceBase64 && (sessionFrameCount === 1 || sessionFrameCount % 5 === 0));
       if (sendingRef) {
         payload.reference_image_url = referenceBase64;
-        settingsApplied = true;
-        console.log("Sending reference image, base64 size:", Math.round(referenceBase64.length / 1024) + "KB");
+        if (sessionFrameCount === 1) console.log("Sending reference image, base64 size:", Math.round(referenceBase64.length / 1024) + "KB");
       }
       wsSend(payload);
       frameInFlight = true;
@@ -638,6 +639,7 @@ async function startStream() {
   stopBtn.disabled  = false;
   setStatus("STARTING…", "connecting");
   settingsApplied   = false;
+  sessionFrameCount = 0;
   openOutputTab();
 
   try {
