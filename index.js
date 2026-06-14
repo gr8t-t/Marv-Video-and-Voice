@@ -584,13 +584,13 @@ async function handleFalMessage(data) {
     clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
     frameInFlight = false;
     warmResponseCount++;
-    if (warmResponseCount <= 2) {
-      // Skip first 2 responses per session — model hasn't fully loaded the reference yet.
-      // Showing these frames causes the "wrong/different avatar" flash the user sees.
-      console.log(`Warmup frame ${warmResponseCount}/2 — suppressing`);
+    if (warmResponseCount <= 4) {
+      // Skip first 4 responses per session — model needs several frames to fully
+      // embed the reference image before output stabilises on the right avatar.
+      console.log(`Warmup frame ${warmResponseCount}/4 — suppressing`);
       return;
     }
-    if (warmResponseCount === 3) channel.postMessage({ type: "warmed" });
+    if (warmResponseCount === 5) channel.postMessage({ type: "warmed" });
     if (imgBytes) {
       displayOutputFrame(imgBytes);
     } else {
