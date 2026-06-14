@@ -482,15 +482,21 @@ function setupOutputStream() {
   outputCanvas.width  = 512;
   outputCanvas.height = 512;
   outputCtx = outputCanvas.getContext("2d");
-  injectStream(outputCanvas.captureStream(30));
+  outputCtx.fillStyle = "#111";
+  outputCtx.fillRect(0, 0, 512, 512);
+  const stream = outputCanvas.captureStream(30);
+  injectStream(stream);
 }
 
 function displayOutputFrame(bytes) {
   if (!outputCtx) return;
+  const ctx    = outputCtx;    // capture before async — stopFrameLoop may null these
+  const canvas = outputCanvas;
   const blob = new Blob([bytes], { type: "image/jpeg" });
   createImageBitmap(blob).then(bitmap => {
-    outputCtx.drawImage(bitmap, 0, 0, outputCanvas.width, outputCanvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
+    console.log("frame drawn to canvas, size:", canvas.width, "x", canvas.height);
   }).catch(e => console.warn("frame draw error:", e));
 }
 
@@ -521,11 +527,11 @@ function startFrameLoop() {
   frameLoopId = requestAnimationFrame(loop);
 }
 
-function stopFrameLoop() {
+function stopFrameLoop(keepOutput = false) {
   if (frameLoopId) { cancelAnimationFrame(frameLoopId); frameLoopId = null; }
   frameInFlight = false;
   captureCanvas = null; captureCtx = null;
-  outputCanvas  = null; outputCtx  = null;
+  if (!keepOutput) { outputCanvas = null; outputCtx = null; }
 }
 
 // ── FAL.AI MESSAGE HANDLER ────────────────────────────────────────────────────
@@ -639,38 +645,13 @@ async function startStream() {
     const wsUrl = `wss://fal.run/decart/lucy-realtime-2/realtime?fal_jwt_token=${encodeURIComponent(falToken)}`;
     falWs = new WebSocket(wsUrl);
     falWs.binaryType = "arraybuffer";
-
     falWs.onopen = () => {
       console.log("fal.ai WebSocket connected — starting frame capture…");
       setupOutputStream();
       startFrameLoop();
       setStatus("CONNECTING…", "connecting");
     };
-
-    falWs.onmessage = async (event) => {
-      const raw  = event.data;
-      const data = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch(_) { return null; } })() : Msgpack.decode(raw);
-      if (data) {
-        // Log shape of first few messages to diagnose response format
-        const keys = Object.keys(data);
-        console.log("fal.ai decoded keys:", keys, "| sample:", JSON.stringify(data, (k,v) => v instanceof Uint8Array ? `<Uint8Array len=${v.length}>` : v).slice(0, 300));
-        await handleFalMessage(data);
-      } else {
-        console.log("fal.ai decode failed, raw size:", typeof raw === "string" ? raw.length : raw.byteLength, "first byte:", new Uint8Array(raw instanceof ArrayBuffer ? raw : raw.buffer)[0]?.toString(16));
-      }
-    };
-
-    falWs.onerror = () => {
-      showToast("⚠ Connection error. Please try again.");
-      startBtn.disabled = false;
-      setStatus("ERROR", "error");
-    };
-
-    falWs.onclose = (evt) => {
-      console.log("WebSocket closed:", evt.code, evt.reason);
-      if (isConnected) handleDisconnect();
-      else { startBtn.disabled = false; setStatus("IDLE", ""); }
-    };
+    attachFalWsHandlers(falWs);
 
   } catch (err) {
     console.error("Start error:", err);
@@ -678,6 +659,70 @@ async function startStream() {
     setStatus("ERROR", "error");
     startBtn.disabled = false;
     stopStream(true);
+  }
+}
+
+function attachFalWsHandlers(ws) {
+  ws.onmessage = async (event) => {
+    const raw  = event.data;
+    const data = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch(_) { return null; } })() : Msgpack.decode(raw);
+    if (data) {
+      const keys = Object.keys(data);
+      console.log("fal.ai decoded keys:", keys, "| sample:", JSON.stringify(data, (k,v) => v instanceof Uint8Array ? `<Uint8Array len=${v.length}>` : v).slice(0, 300));
+      await handleFalMessage(data);
+    } else {
+      console.log("fal.ai decode failed, raw size:", typeof raw === "string" ? raw.length : raw.byteLength, "first byte:", new Uint8Array(raw instanceof ArrayBuffer ? raw : raw.buffer)[0]?.toString(16));
+    }
+  };
+
+  ws.onerror = () => {
+    showToast("⚠ Connection error. Please try again.");
+    startBtn.disabled = false;
+    setStatus("ERROR", "error");
+  };
+
+  ws.onclose = (evt) => {
+    console.log("WebSocket closed:", evt.code, evt.reason);
+    if (isConnected && evt.code === 1000) {
+      console.log("WS normal close — auto-reconnecting…");
+      reconnectFalWs();
+    } else if (isConnected) {
+      handleDisconnect();
+    } else {
+      startBtn.disabled = false;
+      setStatus("IDLE", "");
+    }
+  };
+}
+
+async function reconnectFalWs() {
+  setStatus("RECONNECTING…", "connecting");
+  stopFrameLoop(true);   // keep outputCanvas/outputCtx alive
+  if (falWs) { try { falWs.close(); } catch(_) {} falWs = null; }
+
+  try {
+    const tokenRes  = await fetch("/api/decart-token", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ email: currentEmail }),
+    });
+    const tokenData = await tokenRes.json();
+    if (tokenData.error || !tokenData.falToken) throw new Error("Token refresh failed");
+    balance = tokenData.balance ?? balance;
+    updateCoinUI();
+
+    const wsUrl = `wss://fal.run/decart/lucy-realtime-2/realtime?fal_jwt_token=${encodeURIComponent(tokenData.falToken)}`;
+    falWs = new WebSocket(wsUrl);
+    falWs.binaryType = "arraybuffer";
+    falWs.onopen = () => {
+      console.log("fal.ai WebSocket reconnected");
+      startFrameLoop();
+      setStatus("LIVE", "live");
+    };
+    attachFalWsHandlers(falWs);
+  } catch(err) {
+    console.error("Reconnect error:", err);
+    handleDisconnect();
   }
 }
 
