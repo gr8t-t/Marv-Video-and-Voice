@@ -3,12 +3,12 @@
 //  Powered by fal.ai decart/lucy-realtime-2/realtime
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── MSGPACK (proper binary encoder + JSON decoder for fal.ai protocol) ────────
-// fal.ai realtime requires binary msgpack frames for outgoing messages
+// ── MSGPACK (full encoder + decoder for fal.ai binary protocol) ───────────────
 const Msgpack = (() => {
   const _enc = new TextEncoder();
   const _dec = new TextDecoder();
 
+  // ── ENCODER ──────────────────────────────────────────────────────────────────
   function _val(v, bufs) {
     if (v === null || v === undefined) {
       bufs.push(new Uint8Array([0xc0]));
@@ -61,12 +61,62 @@ const Msgpack = (() => {
     return out;
   }
 
+  // ── DECODER ──────────────────────────────────────────────────────────────────
   function decode(data) {
     try {
-      if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
-        return JSON.parse(_dec.decode(data));
+      // First try: plain JSON text (for simple server messages like timings)
+      if (typeof data === 'string') return JSON.parse(data);
+
+      const buf   = data instanceof ArrayBuffer ? data : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      const bytes = new Uint8Array(buf);
+      const dv    = new DataView(buf);
+
+      // Quick check: if it starts with '{' or '[' it's JSON-in-binary
+      if (bytes[0] === 0x7b || bytes[0] === 0x5b) {
+        try { return JSON.parse(_dec.decode(bytes)); } catch(_) {}
       }
-      return typeof data === 'string' ? JSON.parse(data) : null;
+
+      let pos = 0;
+
+      function readVal() {
+        const b = bytes[pos++];
+        if (b <= 0x7f) return b;                                  // positive fixint
+        if (b >= 0xe0) return b - 256;                            // negative fixint
+        if ((b & 0xf0) === 0x80) return readMap(b & 0x0f);       // fixmap
+        if ((b & 0xf0) === 0x90) return readArr(b & 0x0f);       // fixarray
+        if ((b & 0xe0) === 0xa0) return readStr(b & 0x1f);       // fixstr
+        switch (b) {
+          case 0xc0: return null;
+          case 0xc2: return false;
+          case 0xc3: return true;
+          case 0xc4: return readBin(bytes[pos++]);                                                            // bin8
+          case 0xc5: { const n=(bytes[pos++]<<8)|bytes[pos++]; return readBin(n); }                          // bin16
+          case 0xc6: { const n=dv.getUint32(pos,false); pos+=4; return readBin(n); }                         // bin32
+          case 0xca: { const v=dv.getFloat32(pos,false); pos+=4; return v; }                                 // float32
+          case 0xcb: { const v=dv.getFloat64(pos,false); pos+=8; return v; }                                 // float64
+          case 0xcc: return bytes[pos++];                                                                     // uint8
+          case 0xcd: { const v=(bytes[pos++]<<8)|bytes[pos++]; return v; }                                   // uint16
+          case 0xce: { const v=dv.getUint32(pos,false); pos+=4; return v; }                                  // uint32
+          case 0xcf: { const h=dv.getUint32(pos,false); pos+=4; const l=dv.getUint32(pos,false); pos+=4; return h*0x100000000+l; } // uint64
+          case 0xd0: { const v=bytes[pos++]; return v>127?v-256:v; }                                         // int8
+          case 0xd1: { const v=(bytes[pos++]<<8)|bytes[pos++]; return v>32767?v-65536:v; }                   // int16
+          case 0xd2: { const v=dv.getInt32(pos,false); pos+=4; return v; }                                   // int32
+          case 0xd9: return readStr(bytes[pos++]);                                                            // str8
+          case 0xda: { const n=(bytes[pos++]<<8)|bytes[pos++]; return readStr(n); }                          // str16
+          case 0xdb: { const n=dv.getUint32(pos,false); pos+=4; return readStr(n); }                         // str32
+          case 0xdc: { const n=(bytes[pos++]<<8)|bytes[pos++]; return readArr(n); }                          // array16
+          case 0xdd: { const n=dv.getUint32(pos,false); pos+=4; return readArr(n); }                         // array32
+          case 0xde: { const n=(bytes[pos++]<<8)|bytes[pos++]; return readMap(n); }                          // map16
+          case 0xdf: { const n=dv.getUint32(pos,false); pos+=4; return readMap(n); }                         // map32
+          default: return null;
+        }
+      }
+      function readStr(n) { const s=_dec.decode(bytes.subarray(pos,pos+n)); pos+=n; return s; }
+      function readBin(n) { const s=bytes.slice(pos,pos+n); pos+=n; return s; }
+      function readArr(n) { const a=[]; for(let i=0;i<n;i++) a.push(readVal()); return a; }
+      function readMap(n) { const o={}; for(let i=0;i<n;i++){const k=readVal();o[k]=readVal();} return o; }
+
+      return readVal();
     } catch(e) { return null; }
   }
 
@@ -480,12 +530,21 @@ function stopFrameLoop() {
 async function handleFalMessage(data) {
   if (!data || typeof data !== "object") return;
 
+  // Convert binary image bytes to data URL
+  function binToDataUrl(bytes) {
+    let s = ""; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return "data:image/jpeg;base64," + btoa(s);
+  }
+
   // Successful image result (check many possible response shapes)
-  const imgUrl = data?.images?.[0]?.url
+  const raw0 = data?.images?.[0];
+  const imgUrl = (raw0 instanceof Uint8Array ? binToDataUrl(raw0) : null)
+    || raw0?.url
+    || (data?.image instanceof Uint8Array ? binToDataUrl(data.image) : null)
     || data?.image?.url
     || data?.output?.url
     || data?.result?.url
-    || (typeof data?.images?.[0] === "string" ? data.images[0] : null);
+    || (typeof raw0 === "string" ? raw0 : null);
 
   if (imgUrl) {
     frameInFlight = false;
@@ -587,14 +646,15 @@ async function startStream() {
 
     falWs.onmessage = async (event) => {
       const raw  = event.data;
-      let   data = null;
-      if (typeof raw === "string") {
-        try { data = JSON.parse(raw); } catch(e) { console.log("fal.ai raw text:", raw.slice(0, 200)); }
+      const data = typeof raw === "string" ? (() => { try { return JSON.parse(raw); } catch(_) { return null; } })() : Msgpack.decode(raw);
+      if (data) {
+        // Log shape of first few messages to diagnose response format
+        const keys = Object.keys(data);
+        console.log("fal.ai decoded keys:", keys, "| sample:", JSON.stringify(data, (k,v) => v instanceof Uint8Array ? `<Uint8Array len=${v.length}>` : v).slice(0, 300));
+        await handleFalMessage(data);
       } else {
-        data = Msgpack.decode(raw);
-        if (!data) console.log("fal.ai binary msg size:", raw.byteLength);
+        console.log("fal.ai decode failed, raw size:", typeof raw === "string" ? raw.length : raw.byteLength, "first byte:", new Uint8Array(raw instanceof ArrayBuffer ? raw : raw.buffer)[0]?.toString(16));
       }
-      if (data) await handleFalMessage(data);
     };
 
     falWs.onerror = () => {
