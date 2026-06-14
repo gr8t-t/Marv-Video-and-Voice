@@ -536,14 +536,17 @@ function startFrameLoop() {
         "Transform me into the person in the reference image. Keep background unchanged.";
       sessionFrameCount++;
       const payload = { prompt, image_url: imageUrl };
-      // Send reference only on first frame of each WS session, or when Apply Settings clicked.
-      // Sending it more often forces the model to restart its pipeline → periodic slowdowns.
-      const sendingRef = !!(referenceBase64 && (sessionFrameCount === 1 || !settingsApplied));
+      // Send reference on first 3 frames of each session so the model gets multiple
+      // passes to fully embed it, plus whenever Apply Settings is clicked.
+      // Sending it beyond frame 3 causes periodic ~5s stalls.
+      const sendingRef = !!(referenceBase64 && (sessionFrameCount <= 3 || !settingsApplied));
       if (sendingRef) {
         payload.reference_image_url = referenceBase64;
-        settingsApplied   = true;
-        warmResponseCount = 0; // model will re-warm with new reference
-        console.log("Sending reference image, size:", Math.round(referenceBase64.length / 1024) + "KB");
+        if (sessionFrameCount === 1) {
+          settingsApplied   = true;
+          warmResponseCount = 0;
+          console.log("Sending reference image, size:", Math.round(referenceBase64.length / 1024) + "KB");
+        }
       }
       wsSend(payload);
       frameInFlight = true;
@@ -584,13 +587,13 @@ async function handleFalMessage(data) {
     clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
     frameInFlight = false;
     warmResponseCount++;
-    if (warmResponseCount <= 4) {
-      // Skip first 4 responses per session — model needs several frames to fully
-      // embed the reference image before output stabilises on the right avatar.
-      console.log(`Warmup frame ${warmResponseCount}/4 — suppressing`);
+    if (warmResponseCount <= 8) {
+      // Skip first 8 responses per session — model progressively refines the
+      // reference embedding over several frames before output fully stabilises.
+      console.log(`Warmup frame ${warmResponseCount}/8 — suppressing`);
       return;
     }
-    if (warmResponseCount === 5) channel.postMessage({ type: "warmed" });
+    if (warmResponseCount === 9) channel.postMessage({ type: "warmed" });
     if (imgBytes) {
       displayOutputFrame(imgBytes);
     } else {
