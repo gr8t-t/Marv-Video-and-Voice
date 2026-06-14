@@ -232,8 +232,8 @@ const enhanceToggle = document.getElementById("enhance-toggle");
 function handleImageFile(file) {
   if (!file.type.startsWith("image/")) { showToast("⚠ Invalid file type."); return; }
   if (file.size > 10 * 1024 * 1024)   { showToast("⚠ Image too large (max 10MB)."); return; }
-  const maxSize = enhanceToggle?.checked ? 1024 : 768;
-  const quality = enhanceToggle?.checked ? 0.95 : 0.88;
+  const maxSize = enhanceToggle?.checked ? 512 : 384;
+  const quality = enhanceToggle?.checked ? 0.90 : 0.85;
   compressImage(file, maxSize, quality).then(compressed => {
     referenceFile = compressed;
     imagePreview.src = URL.createObjectURL(compressed);
@@ -533,19 +533,21 @@ function startFrameLoop() {
       const prompt = promptInput.value.trim() ||
         "Transform me into the person in the reference image. Keep background unchanged.";
       const payload = { prompt, image_url: imageUrl };
-      // Send reference once per session; re-send when settingsApplied is reset
-      if (referenceBase64 && !settingsApplied) {
+      // Send reference once per full stream session (not per WS reconnect)
+      const sendingRef = !!(referenceBase64 && !settingsApplied);
+      if (sendingRef) {
         payload.reference_image_url = referenceBase64;
         settingsApplied = true;
+        console.log("Sending reference image, base64 size:", Math.round(referenceBase64.length / 1024) + "KB");
       }
       wsSend(payload);
       frameInFlight = true;
-      // Safety timeout: if server never responds, unblock after 6 s
+      // Give more time when reference is included (model takes longer to process)
       clearTimeout(frameInFlightTimer);
       frameInFlightTimer = setTimeout(() => {
         console.warn("frameInFlight timeout — unblocking");
         frameInFlight = false;
-      }, 6000);
+      }, sendingRef ? 20000 : 6000);
     }
     frameLoopId = requestAnimationFrame(loop);
   }
@@ -723,7 +725,6 @@ function attachFalWsHandlers(ws) {
 async function reconnectFalWs() {
   setStatus("RECONNECTING…", "connecting");
   stopFrameLoop(true);   // keep outputCanvas/outputCtx alive
-  settingsApplied = false;  // re-send reference to new WS session
   if (falWs) { try { falWs.close(); } catch(_) {} falWs = null; }
 
   try {
