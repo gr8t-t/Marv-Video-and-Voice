@@ -155,12 +155,13 @@ const buyCoinBtn        = document.getElementById("buy-coins-btn");
 const voiceGrid         = document.getElementById("voice-grid");
 
 // ── STATE ─────────────────────────────────────────────────────────────────────
-let falWs           = null;
-let localStream     = null;
-let referenceFile   = null;
-let referenceBase64 = null;
-let isConnected     = false;
-let settingsApplied = false;
+let falWs              = null;
+let localStream        = null;
+let referenceFile      = null;
+let referenceBase64    = null;
+let isConnected        = false;
+let settingsApplied    = false;
+let frameInFlightTimer = null;
 let outputTab       = null;
 let selectedFormat  = window.__forcedFormat || "laptop";
 let currentEmail    = null;
@@ -520,22 +521,31 @@ function startFrameLoop() {
   function loop() {
     if (!falWs || falWs.readyState !== WebSocket.OPEN) return;
     if (!frameInFlight && inputVideo.videoWidth > 0) {
-      // Resize capture canvas to actual video dimensions on first real frame
-      if (captureCanvas.width !== inputVideo.videoWidth || captureCanvas.height !== inputVideo.videoHeight) {
-        const s = Math.min(1088 / inputVideo.videoWidth, 624 / inputVideo.videoHeight, 1);
-        captureCanvas.width  = Math.round(inputVideo.videoWidth  * s);
-        captureCanvas.height = Math.round(inputVideo.videoHeight * s);
+      // Sync canvas to video aspect ratio on first real frame
+      const s = Math.min(1088 / inputVideo.videoWidth, 624 / inputVideo.videoHeight, 1);
+      const tw = Math.round(inputVideo.videoWidth  * s);
+      const th = Math.round(inputVideo.videoHeight * s);
+      if (captureCanvas.width !== tw || captureCanvas.height !== th) {
+        captureCanvas.width = tw; captureCanvas.height = th;
       }
-      captureCtx.drawImage(inputVideo, 0, 0, captureCanvas.width, captureCanvas.height);
+      captureCtx.drawImage(inputVideo, 0, 0, tw, th);
       const imageUrl = captureCanvas.toDataURL("image/jpeg", 0.88);
       const prompt = promptInput.value.trim() ||
-        "Transform my face and body realistically with enhanced lighting and clarity. Keep all objects and background unchanged.";
+        "Transform me into the person in the reference image. Keep background unchanged.";
       const payload = { prompt, image_url: imageUrl };
-      if (referenceBase64) {
+      // Send reference once per session; re-send when settingsApplied is reset
+      if (referenceBase64 && !settingsApplied) {
         payload.reference_image_url = referenceBase64;
+        settingsApplied = true;
       }
       wsSend(payload);
       frameInFlight = true;
+      // Safety timeout: if server never responds, unblock after 6 s
+      clearTimeout(frameInFlightTimer);
+      frameInFlightTimer = setTimeout(() => {
+        console.warn("frameInFlight timeout — unblocking");
+        frameInFlight = false;
+      }, 6000);
     }
     frameLoopId = requestAnimationFrame(loop);
   }
@@ -544,6 +554,7 @@ function startFrameLoop() {
 
 function stopFrameLoop(keepOutput = false) {
   if (frameLoopId) { cancelAnimationFrame(frameLoopId); frameLoopId = null; }
+  clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
   frameInFlight = false;
   captureCanvas = null; captureCtx = null;
   if (!keepOutput) { outputCanvas = null; outputCtx = null; }
@@ -564,6 +575,7 @@ async function handleFalMessage(data) {
     || (typeof raw0 === "string" ? raw0 : null);
 
   if (imgBytes || imgStrUrl) {
+    clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
     frameInFlight = false;
     if (imgBytes) {
       displayOutputFrame(imgBytes);
@@ -586,12 +598,9 @@ async function handleFalMessage(data) {
 
   // fal.ai system messages
   if (data.type === "x-fal-message") {
-    if (data.action === "timings") {
-      frameInFlight = false; // server acknowledged, ready for next frame
-    } else {
-      console.log("fal.ai x-fal-message:", data.action, JSON.stringify(data));
-      frameInFlight = false;
-    }
+    clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
+    frameInFlight = false;
+    if (data.action !== "timings") console.log("fal.ai x-fal-message:", data.action, JSON.stringify(data));
     return;
   }
 
@@ -599,6 +608,7 @@ async function handleFalMessage(data) {
   if (data.type === "x-fal-error" || data.type === "error" || data.status === "error") {
     console.error("fal.ai error:", data.error || data.message, data.reason || "");
     showToast("⚠ Stream error: " + (data.error || data.message || "Unknown"));
+    clearTimeout(frameInFlightTimer); frameInFlightTimer = null;
     frameInFlight = false;
     return;
   }
@@ -713,6 +723,7 @@ function attachFalWsHandlers(ws) {
 async function reconnectFalWs() {
   setStatus("RECONNECTING…", "connecting");
   stopFrameLoop(true);   // keep outputCanvas/outputCtx alive
+  settingsApplied = false;  // re-send reference to new WS session
   if (falWs) { try { falWs.close(); } catch(_) {} falWs = null; }
 
   try {
