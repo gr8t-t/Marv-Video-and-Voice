@@ -722,8 +722,11 @@ function attachFalWsHandlers(ws) {
 
   ws.onclose = (evt) => {
     console.log("WebSocket closed:", evt.code, evt.reason);
-    if (isConnected && evt.code === 1000) {
-      console.log("WS normal close — auto-reconnecting…");
+    // Reconnect on any close while the user's webcam session is active.
+    // 1000 = planned server session limit (~20s). 1006 = dropped connection.
+    // Use localStream (not isConnected) so warmup-period drops are also caught.
+    if (localStream && (evt.code === 1000 || evt.code === 1006)) {
+      console.log(`WS ${evt.code === 1006 ? "dropped" : "session limit"} — auto-reconnecting…`);
       reconnectFalWs();
     } else if (isConnected) {
       handleDisconnect();
