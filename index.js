@@ -177,8 +177,9 @@ let captureCtx       = null;
 let outputCanvas     = null;
 let outputCtx        = null;
 let frameLoopId      = null;
-let frameInFlight    = false;
+let frameInFlight     = false;
 let warmResponseCount = 0;
+let referenceUrl      = null; // fal.ai CDN URL for the reference image (preferred over base64)
 
 // ── BROADCAST CHANNEL ─────────────────────────────────────────────────────────
 const channel = new BroadcastChannel("lucy_stream");
@@ -237,12 +238,37 @@ function handleImageFile(file) {
   const maxSize = enhanceToggle?.checked ? 512 : 384;
   const quality = enhanceToggle?.checked ? 0.90 : 0.85;
   compressImage(file, maxSize, quality).then(compressed => {
-    referenceFile = compressed;
+    referenceFile    = compressed;
+    referenceBase64  = null;
+    referenceUrl     = null;
     imagePreview.src = URL.createObjectURL(compressed);
     imagePreviewWrap.style.display = "block";
-    uploadZone.style.display = "none";
+    uploadZone.style.display       = "none";
     settingsApplied = false;
-    fileToBase64(compressed).then(b64 => { referenceBase64 = b64; });
+
+    fileToBase64(compressed).then(async b64 => {
+      referenceBase64 = b64;
+      // Upload to fal.ai CDN so the model receives an HTTPS URL it can fetch.
+      // The model silently ignores reference_image_url when it's a base64 data URL.
+      if (currentEmail) {
+        try {
+          const res  = await fetch("/api/upload-reference", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ imageBase64: b64, email: currentEmail }),
+          });
+          const data = await res.json();
+          if (data.referenceUrl) {
+            referenceUrl = data.referenceUrl;
+            console.log("Reference uploaded to CDN:", referenceUrl);
+          } else {
+            console.warn("CDN upload failed, will fall back to base64:", data.error);
+          }
+        } catch (e) {
+          console.warn("CDN upload error, will fall back to base64:", e.message);
+        }
+      }
+    });
   });
 }
 
@@ -270,7 +296,7 @@ function compressImage(file, maxSize = 1024, quality = 0.95) {
 }
 
 removeImageBtn.addEventListener("click", () => {
-  referenceFile = null; referenceBase64 = null; imagePreview.src = "";
+  referenceFile = null; referenceBase64 = null; referenceUrl = null; imagePreview.src = "";
   imagePreviewWrap.style.display = "none"; uploadZone.style.display = "block";
   imageUpload.value = ""; settingsApplied = false;
 });
@@ -536,16 +562,19 @@ function startFrameLoop() {
         "Transform me into the person in the reference image. Keep background unchanged.";
       sessionFrameCount++;
       const payload = { prompt, image_url: imageUrl };
-      // Send reference on first 3 frames of each session so the model gets multiple
-      // passes to fully embed it, plus whenever Apply Settings is clicked.
-      // Sending it beyond frame 3 causes periodic ~5s stalls.
-      const sendingRef = !!(referenceBase64 && (sessionFrameCount <= 3 || !settingsApplied));
+      // Prefer the CDN URL (model requires an HTTPS URL for reference_image_url;
+      // base64 data URLs are silently ignored). Fall back to base64 if upload failed.
+      const refData = referenceUrl || referenceBase64;
+      // Send reference on first 3 frames per session for multiple embedding passes,
+      // plus whenever Apply Settings is clicked.
+      const sendingRef = !!(refData && (sessionFrameCount <= 3 || !settingsApplied));
       if (sendingRef) {
-        payload.reference_image_url = referenceBase64;
+        payload.reference_image_url = refData;
         if (sessionFrameCount === 1) {
           settingsApplied   = true;
           warmResponseCount = 0;
-          console.log("Sending reference image, size:", Math.round(referenceBase64.length / 1024) + "KB");
+          const refType = referenceUrl ? "CDN URL" : "base64 fallback";
+          console.log(`Sending reference (${refType}):`, referenceUrl || Math.round(referenceBase64.length / 1024) + "KB");
         }
       }
       wsSend(payload);
