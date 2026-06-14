@@ -226,10 +226,14 @@ uploadZone.addEventListener("drop", e => {
 });
 imageUpload.addEventListener("change", () => { if (imageUpload.files[0]) handleImageFile(imageUpload.files[0]); });
 
+const enhanceToggle = document.getElementById("enhance-toggle");
+
 function handleImageFile(file) {
   if (!file.type.startsWith("image/")) { showToast("⚠ Invalid file type."); return; }
   if (file.size > 10 * 1024 * 1024)   { showToast("⚠ Image too large (max 10MB)."); return; }
-  compressImage(file, 512).then(compressed => {
+  const maxSize = enhanceToggle?.checked ? 1024 : 768;
+  const quality = enhanceToggle?.checked ? 0.95 : 0.88;
+  compressImage(file, maxSize, quality).then(compressed => {
     referenceFile = compressed;
     imagePreview.src = URL.createObjectURL(compressed);
     imagePreviewWrap.style.display = "block";
@@ -239,7 +243,12 @@ function handleImageFile(file) {
   });
 }
 
-function compressImage(file, maxSize = 1024) {
+// Re-compress reference when enhance toggle changes
+enhanceToggle?.addEventListener("change", () => {
+  if (referenceFile) handleImageFile(referenceFile);
+});
+
+function compressImage(file, maxSize = 1024, quality = 0.95) {
   return new Promise(resolve => {
     const img = new Image(), url = URL.createObjectURL(file);
     img.onload = () => {
@@ -250,7 +259,7 @@ function compressImage(file, maxSize = 1024) {
       canvas.width = Math.round(w); canvas.height = Math.round(h);
       canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
       URL.revokeObjectURL(url);
-      canvas.toBlob(blob => resolve(blob || file), "image/jpeg", 0.95);
+      canvas.toBlob(blob => resolve(blob || file), "image/jpeg", quality);
     };
     img.onerror = () => resolve(file);
     img.src = url;
@@ -498,16 +507,27 @@ function displayOutputFrame(bytes) {
 
 function startFrameLoop() {
   captureCanvas = document.createElement("canvas");
-  captureCanvas.width  = 512;
-  captureCanvas.height = 512;
+  // Size to match model output aspect ratio (1088×624, 16:9) — use video native dims if available
+  const capW = inputVideo.videoWidth  || 1088;
+  const capH = inputVideo.videoHeight || 624;
+  // cap at 1088×624 to avoid oversized payloads
+  const scale = Math.min(1088 / capW, 624 / capH, 1);
+  captureCanvas.width  = Math.round(capW * scale);
+  captureCanvas.height = Math.round(capH * scale);
   captureCtx = captureCanvas.getContext("2d");
   frameInFlight = false;
 
   function loop() {
     if (!falWs || falWs.readyState !== WebSocket.OPEN) return;
     if (!frameInFlight && inputVideo.videoWidth > 0) {
-      captureCtx.drawImage(inputVideo, 0, 0, 512, 512);
-      const imageUrl = captureCanvas.toDataURL("image/jpeg", 0.8);
+      // Resize capture canvas to actual video dimensions on first real frame
+      if (captureCanvas.width !== inputVideo.videoWidth || captureCanvas.height !== inputVideo.videoHeight) {
+        const s = Math.min(1088 / inputVideo.videoWidth, 624 / inputVideo.videoHeight, 1);
+        captureCanvas.width  = Math.round(inputVideo.videoWidth  * s);
+        captureCanvas.height = Math.round(inputVideo.videoHeight * s);
+      }
+      captureCtx.drawImage(inputVideo, 0, 0, captureCanvas.width, captureCanvas.height);
+      const imageUrl = captureCanvas.toDataURL("image/jpeg", 0.88);
       const prompt = promptInput.value.trim() ||
         "Transform my face and body realistically with enhanced lighting and clarity. Keep all objects and background unchanged.";
       const payload = { prompt, image_url: imageUrl };
